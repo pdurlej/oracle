@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import chalk from "chalk";
 import { sessionStore } from "../sessionStore.js";
 import type { SessionMetadata } from "../sessionStore.js";
+import { resolveBrowserConfig } from "../browser/config.js";
 import {
   collectChatGptTabs,
   DEFAULT_REMOTE_CHROME_HOST,
@@ -21,7 +22,6 @@ import { resolveOutputPath } from "./writeOutputPath.js";
 
 const LIVE_POLL_MS = 2000;
 const DEFAULT_STALL_THRESHOLD_MS = 60_000;
-const HARVEST_FRESHNESS_TIMEOUT_MS = 5_000;
 const HARVEST_FRESHNESS_POLL_MS = 250;
 
 function isRecoverableMissingTabError(message: string): boolean {
@@ -104,7 +104,8 @@ async function harvestSessionPrompt(
   options: Parameters<typeof harvestChatGptTab>[0],
 ): Promise<ChatGptTabSummary> {
   const expectedPrompt = expectedLatestUserPrompt(meta);
-  const deadline = Date.now() + HARVEST_FRESHNESS_TIMEOUT_MS;
+  const freshnessTimeoutMs = resolveBrowserConfig(meta.browser?.config).inputTimeoutMs;
+  const deadline = Date.now() + freshnessTimeoutMs;
   let harvested = await harvestChatGptTab(options);
   while (!harvestMatchesSessionPrompt(harvested, expectedPrompt) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, HARVEST_FRESHNESS_POLL_MS));
@@ -112,7 +113,7 @@ async function harvestSessionPrompt(
   }
   if (!harvestMatchesSessionPrompt(harvested, expectedPrompt)) {
     throw new Error(
-      "Latest ChatGPT turn did not contain an assistant answer paired with this session prompt after 5s; refusing to harvest stale output.",
+      `Latest ChatGPT turn did not contain an assistant answer paired with this session prompt after ${Math.ceil(freshnessTimeoutMs / 1000)}s; refusing to harvest stale output.`,
     );
   }
   return harvested;
