@@ -45,6 +45,7 @@ const completedHarvest = {
   lastAssistantMarkdown: "## Recovered answer\n\nFull response captured.",
   lastAssistantText: "Recovered answer. Full response captured.",
   lastAssistantSnippet: "Recovered answer.",
+  lastUserText: "original prompt",
   lastUserSnippet: "original prompt",
 } as const;
 
@@ -248,5 +249,255 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
       }),
     ).rejects.toThrow(/explicit-ref/);
     expect(recoverConversationTab).not.toHaveBeenCalled();
+  });
+
+  test("waits for the assistant paired with the session prompt instead of harvesting a stale turn", async () => {
+    const staleHarvest = {
+      ...completedHarvest,
+      lastUserText: "Current neutral request with the latest constraints",
+      lastUserSnippet: "Current neutral request",
+      lastAssistantText: "Older answer",
+      lastAssistantMarkdown: "Older answer",
+      assistantFollowsLatestUser: false,
+    };
+    const freshHarvest = {
+      ...completedHarvest,
+      lastUserText: "Current neutral request with the latest constraints",
+      lastUserSnippet: "Current neutral request",
+    };
+    const harvestChatGptTab = vi
+      .fn()
+      .mockResolvedValueOnce(staleHarvest)
+      .mockResolvedValueOnce(freshHarvest);
+
+    vi.doMock("../../src/browser/liveTabs.js", () => ({
+      collectChatGptTabs: vi.fn(),
+      DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+      DEFAULT_REMOTE_CHROME_PORT: 9222,
+      extractConversationIdFromUrl: () => "saved-conversation",
+      formatBrowserTabState: () => "completed",
+      harvestChatGptTab,
+      sessionMatchesTab: () => false,
+    }));
+    vi.doMock("../../src/browser/recoverConversation.js", () => ({
+      recoverConversationTab: vi.fn(),
+    }));
+    vi.doMock("../../src/sessionStore.js", () => ({
+      sessionStore: {
+        readSession: async () => ({
+          ...baseMeta,
+          options: { prompt: "Current neutral request with the latest constraints" },
+        }),
+        updateSession: async () => {},
+        getPaths,
+      },
+    }));
+
+    const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+    const result = await harvestSessionBrowserOutput("sess-recover", { quietOutput: true });
+
+    expect(harvestChatGptTab).toHaveBeenCalledTimes(2);
+    expect(result.lastAssistantMarkdown).toBe(completedHarvest.lastAssistantMarkdown);
+  });
+
+  test("allows hydration beyond five seconds within the configured input timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const staleHarvest = {
+        ...completedHarvest,
+        lastUserText: "An older neutral request",
+        lastUserSnippet: "An older neutral request",
+      };
+      const freshHarvest = {
+        ...completedHarvest,
+        lastUserText: "Current neutral request",
+        lastUserSnippet: "Current neutral request",
+      };
+      let calls = 0;
+      const harvestChatGptTab = vi.fn(async () => {
+        calls += 1;
+        return calls < 26 ? staleHarvest : freshHarvest;
+      });
+
+      vi.doMock("../../src/browser/liveTabs.js", () => ({
+        collectChatGptTabs: vi.fn(),
+        DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+        DEFAULT_REMOTE_CHROME_PORT: 9222,
+        extractConversationIdFromUrl: () => "saved-conversation",
+        formatBrowserTabState: () => "completed",
+        harvestChatGptTab,
+        sessionMatchesTab: () => false,
+      }));
+      vi.doMock("../../src/browser/recoverConversation.js", () => ({
+        recoverConversationTab: vi.fn(),
+      }));
+      vi.doMock("../../src/sessionStore.js", () => ({
+        sessionStore: {
+          readSession: async () => ({
+            ...baseMeta,
+            options: { prompt: "Current neutral request" },
+            browser: {
+              ...baseMeta.browser,
+              config: { ...baseMeta.browser?.config, inputTimeoutMs: 10_000 },
+            },
+          }),
+          updateSession: async () => {},
+          getPaths,
+        },
+      }));
+
+      const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+      const promise = harvestSessionBrowserOutput("sess-recover", { quietOutput: true });
+      const assertion = expect(promise).resolves.toMatchObject({
+        lastAssistantMarkdown: completedHarvest.lastAssistantMarkdown,
+      });
+      await vi.advanceTimersByTimeAsync(6_500);
+      await assertion;
+      expect(harvestChatGptTab).toHaveBeenCalledTimes(26);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("matches recovery against the final non-empty browser follow-up exactly", async () => {
+    const finalFollowUp = "Yes";
+    const harvestChatGptTab = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...completedHarvest,
+        lastUserText: "Yesterday's unrelated neutral request",
+        lastUserSnippet: "Yesterday's unrelated neutral request",
+        lastAssistantText: "Unrelated answer",
+        lastAssistantMarkdown: "Unrelated answer",
+      })
+      .mockResolvedValueOnce({
+        ...completedHarvest,
+        lastUserText: finalFollowUp,
+        lastUserSnippet: finalFollowUp,
+      });
+
+    vi.doMock("../../src/browser/liveTabs.js", () => ({
+      collectChatGptTabs: vi.fn(),
+      DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+      DEFAULT_REMOTE_CHROME_PORT: 9222,
+      extractConversationIdFromUrl: () => "saved-conversation",
+      formatBrowserTabState: () => "completed",
+      harvestChatGptTab,
+      sessionMatchesTab: () => false,
+    }));
+    vi.doMock("../../src/browser/recoverConversation.js", () => ({
+      recoverConversationTab: vi.fn(),
+    }));
+    vi.doMock("../../src/sessionStore.js", () => ({
+      sessionStore: {
+        readSession: async () => ({
+          ...baseMeta,
+          options: {
+            prompt: "Initial neutral request",
+            browserFollowUps: ["Challenge the recommendation", finalFollowUp, "  "],
+          },
+        }),
+        updateSession: async () => {},
+        getPaths,
+      },
+    }));
+
+    const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+    const result = await harvestSessionBrowserOutput("sess-recover", { quietOutput: true });
+
+    expect(harvestChatGptTab).toHaveBeenCalledTimes(2);
+    expect(result.lastAssistantMarkdown).toBe(completedHarvest.lastAssistantMarkdown);
+  });
+
+  test("matches initial recovery against the stored system and user prompt prefix", async () => {
+    const harvestChatGptTab = vi.fn().mockResolvedValue({
+      ...completedHarvest,
+      lastUserText:
+        "Use the public context only\n\nInitial neutral request\n\nAttached public file context",
+      lastUserSnippet: "Use the public context only",
+    });
+
+    vi.doMock("../../src/browser/liveTabs.js", () => ({
+      collectChatGptTabs: vi.fn(),
+      DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+      DEFAULT_REMOTE_CHROME_PORT: 9222,
+      extractConversationIdFromUrl: () => "saved-conversation",
+      formatBrowserTabState: () => "completed",
+      harvestChatGptTab,
+      sessionMatchesTab: () => false,
+    }));
+    vi.doMock("../../src/browser/recoverConversation.js", () => ({
+      recoverConversationTab: vi.fn(),
+    }));
+    vi.doMock("../../src/sessionStore.js", () => ({
+      sessionStore: {
+        readSession: async () => ({
+          ...baseMeta,
+          options: {
+            prompt: "Initial neutral request",
+            system: "Use the public context only",
+          },
+        }),
+        updateSession: async () => {},
+        getPaths,
+      },
+    }));
+
+    const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+    const result = await harvestSessionBrowserOutput("sess-recover", { quietOutput: true });
+
+    expect(harvestChatGptTab).toHaveBeenCalledTimes(1);
+    expect(result.lastAssistantMarkdown).toBe(completedHarvest.lastAssistantMarkdown);
+  });
+
+  test("fails closed without persisting when the latest answer never matches the session prompt", async () => {
+    vi.useFakeTimers();
+    try {
+      const harvestChatGptTab = vi.fn().mockResolvedValue({
+        ...completedHarvest,
+        lastUserText: "An older neutral request",
+        lastUserSnippet: "An older neutral request",
+        lastAssistantText: "Older answer",
+        lastAssistantMarkdown: "Older answer",
+      });
+      const updateSession = vi.fn(async () => {});
+
+      vi.doMock("../../src/browser/liveTabs.js", () => ({
+        collectChatGptTabs: vi.fn(),
+        DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+        DEFAULT_REMOTE_CHROME_PORT: 9222,
+        extractConversationIdFromUrl: () => "saved-conversation",
+        formatBrowserTabState: () => "completed",
+        harvestChatGptTab,
+        sessionMatchesTab: () => false,
+      }));
+      vi.doMock("../../src/browser/recoverConversation.js", () => ({
+        recoverConversationTab: vi.fn(),
+      }));
+      vi.doMock("../../src/sessionStore.js", () => ({
+        sessionStore: {
+          readSession: async () => ({
+            ...baseMeta,
+            options: { prompt: "Current neutral request" },
+            browser: {
+              ...baseMeta.browser,
+              config: { ...baseMeta.browser?.config, inputTimeoutMs: 750 },
+            },
+          }),
+          updateSession,
+          getPaths,
+        },
+      }));
+
+      const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+      const promise = harvestSessionBrowserOutput("sess-recover", { quietOutput: true });
+      const assertion = expect(promise).rejects.toThrow(/refusing to harvest stale output/i);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await assertion;
+      expect(harvestChatGptTab).toHaveBeenCalledTimes(4);
+      expect(updateSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

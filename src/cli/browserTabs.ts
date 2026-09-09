@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import chalk from "chalk";
 import { sessionStore } from "../sessionStore.js";
 import type { SessionMetadata } from "../sessionStore.js";
+import { resolveBrowserConfig } from "../browser/config.js";
 import {
   collectChatGptTabs,
   DEFAULT_REMOTE_CHROME_HOST,
@@ -23,6 +24,7 @@ import type { BrowserHarvestIntegrity } from "../sessionManager.js";
 
 const LIVE_POLL_MS = 2000;
 const DEFAULT_STALL_THRESHOLD_MS = 60_000;
+const HARVEST_FRESHNESS_POLL_MS = 250;
 
 function isRecoverableMissingTabError(message: string): boolean {
   return (
@@ -49,6 +51,74 @@ function finishRecoveredChrome(
   } catch {
     // best-effort cleanup
   }
+}
+
+function normalizePromptText(value: unknown): string {
+  let text = String(value ?? "").toLowerCase();
+  text = text.replace(/```[^\n]*\n([\s\S]*?)```/g, " $1 ");
+  text = text.replace(/```/g, " ");
+  text = text.replace(/`([^`]*)`/g, "$1");
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function harvestMatchesSessionPrompt(
+  harvested: ChatGptTabSummary,
+  expectedPrompt: { text: string | undefined; exact: boolean },
+): boolean {
+  const assistantText = harvested.lastAssistantMarkdown ?? harvested.lastAssistantText;
+  if (harvested.assistantFollowsLatestUser !== true || !assistantText?.trim()) {
+    return false;
+  }
+  const expected = normalizePromptText(expectedPrompt.text);
+  if (!expected) {
+    return true;
+  }
+  const observed = normalizePromptText(harvested.lastUserText);
+  if (!observed) {
+    return false;
+  }
+  return expectedPrompt.exact ? observed === expected : observed.startsWith(expected);
+}
+
+function expectedLatestUserPrompt(meta: SessionMetadata): {
+  text: string | undefined;
+  exact: boolean;
+} {
+  const followUps = meta.options?.browserFollowUps;
+  if (Array.isArray(followUps)) {
+    for (let index = followUps.length - 1; index >= 0; index -= 1) {
+      const followUp = followUps[index];
+      if (typeof followUp === "string" && followUp.trim()) {
+        return { text: followUp.trim(), exact: true };
+      }
+    }
+  }
+  const system = typeof meta.options?.system === "string" ? meta.options.system.trim() : "";
+  const prompt = typeof meta.options?.prompt === "string" ? meta.options.prompt.trim() : "";
+  return {
+    text: [system, prompt].filter(Boolean).join("\n\n") || undefined,
+    exact: false,
+  };
+}
+
+async function harvestSessionPrompt(
+  meta: SessionMetadata,
+  options: Parameters<typeof harvestChatGptTab>[0],
+): Promise<ChatGptTabSummary> {
+  const expectedPrompt = expectedLatestUserPrompt(meta);
+  const freshnessTimeoutMs = resolveBrowserConfig(meta.browser?.config).inputTimeoutMs;
+  const deadline = Date.now() + freshnessTimeoutMs;
+  let harvested = await harvestChatGptTab(options);
+  while (!harvestMatchesSessionPrompt(harvested, expectedPrompt) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, HARVEST_FRESHNESS_POLL_MS));
+    harvested = await harvestChatGptTab(options);
+  }
+  if (!harvestMatchesSessionPrompt(harvested, expectedPrompt)) {
+    throw new Error(
+      `Latest ChatGPT turn did not contain an assistant answer paired with this session prompt after ${Math.ceil(freshnessTimeoutMs / 1000)}s; refusing to harvest stale output.`,
+    );
+  }
+  return harvested;
 }
 
 export interface BrowserHarvestOptions {
@@ -265,7 +335,7 @@ export async function harvestSessionBrowserOutput(
   try {
     let harvested: ChatGptTabSummary;
     try {
-      harvested = await harvestChatGptTab({
+      harvested = await harvestSessionPrompt(meta, {
         host: initialEndpoint.host,
         port: initialEndpoint.port,
         ref,
@@ -285,7 +355,7 @@ export async function harvestSessionBrowserOutput(
         existingEndpoint: recordedEndpoint ?? undefined,
       });
       recoveredChrome = recovered.chrome;
-      harvested = await harvestChatGptTab({
+      harvested = await harvestSessionPrompt(meta, {
         host: recovered.host,
         port: recovered.port,
         ref: recovered.ref,
