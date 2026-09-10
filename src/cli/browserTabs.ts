@@ -55,7 +55,6 @@ function finishRecoveredChrome(
 
 function normalizePromptText(value: unknown): string {
   let text = String(value ?? "").toLowerCase();
-  text = text.replace(/```[^\n]*\n([\s\S]*?)```/g, " $1 ");
   text = text.replace(/```/g, " ");
   text = text.replace(/`([^`]*)`/g, "$1");
   return text.replace(/\s+/g, " ").trim();
@@ -104,8 +103,11 @@ function expectedLatestUserPrompt(meta: SessionMetadata): {
 async function harvestSessionPrompt(
   meta: SessionMetadata,
   options: Parameters<typeof harvestChatGptTab>[0],
+  requireSessionPrompt = true,
 ): Promise<ChatGptTabSummary> {
-  const expectedPrompt = expectedLatestUserPrompt(meta);
+  const expectedPrompt = requireSessionPrompt
+    ? expectedLatestUserPrompt(meta)
+    : { text: undefined, exact: false };
   const freshnessTimeoutMs = resolveBrowserConfig(meta.browser?.config).inputTimeoutMs;
   const deadline = Date.now() + freshnessTimeoutMs;
   let harvested = await harvestChatGptTab(options);
@@ -335,12 +337,16 @@ export async function harvestSessionBrowserOutput(
   try {
     let harvested: ChatGptTabSummary;
     try {
-      harvested = await harvestSessionPrompt(meta, {
-        host: initialEndpoint.host,
-        port: initialEndpoint.port,
-        ref,
-        stallWindowMs: options.stallWindowMs,
-      });
+      harvested = await harvestSessionPrompt(
+        meta,
+        {
+          host: initialEndpoint.host,
+          port: initialEndpoint.port,
+          ref,
+          stallWindowMs: options.stallWindowMs,
+        },
+        !options.browserTabRef,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!isRecoverableMissingTabError(message) || !recoverIfMissing) {

@@ -450,6 +450,145 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     expect(result.lastAssistantMarkdown).toBe(completedHarvest.lastAssistantMarkdown);
   });
 
+  test("matches a language-tagged fenced prompt after the DOM inspector collapses whitespace", async () => {
+    const harvestChatGptTab = vi.fn().mockResolvedValue({
+      ...completedHarvest,
+      lastUserText: "Explain python print(1)",
+      lastUserSnippet: "Explain python print(1)",
+    });
+
+    vi.doMock("../../src/browser/liveTabs.js", () => ({
+      collectChatGptTabs: vi.fn(),
+      DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+      DEFAULT_REMOTE_CHROME_PORT: 9222,
+      extractConversationIdFromUrl: () => "saved-conversation",
+      formatBrowserTabState: () => "completed",
+      harvestChatGptTab,
+      sessionMatchesTab: () => false,
+    }));
+    vi.doMock("../../src/browser/recoverConversation.js", () => ({
+      recoverConversationTab: vi.fn(),
+    }));
+    vi.doMock("../../src/sessionStore.js", () => ({
+      sessionStore: {
+        readSession: async () => ({
+          ...baseMeta,
+          options: { prompt: "Explain\n```python\nprint(1)\n```" },
+        }),
+        updateSession: async () => {},
+        getPaths,
+      },
+    }));
+
+    const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+    await expect(
+      harvestSessionBrowserOutput("sess-recover", { quietOutput: true }),
+    ).resolves.toMatchObject({ lastUserText: "Explain python print(1)" });
+    expect(harvestChatGptTab).toHaveBeenCalledTimes(1);
+  });
+
+  test("preserves explicit alternate-tab inspection while requiring a paired answer", async () => {
+    const explicitHarvest = {
+      ...completedHarvest,
+      targetId: "explicit-target",
+      url: "https://chatgpt.com/c/alternate-conversation",
+      conversationId: "alternate-conversation",
+      lastUserText: "A different explicit prompt",
+      lastUserSnippet: "A different explicit prompt",
+    };
+    const harvestChatGptTab = vi.fn().mockResolvedValue(explicitHarvest);
+    const updateSession = vi.fn(async () => {});
+
+    vi.doMock("../../src/browser/liveTabs.js", () => ({
+      collectChatGptTabs: vi.fn(),
+      DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+      DEFAULT_REMOTE_CHROME_PORT: 9222,
+      extractConversationIdFromUrl: (url: string) => url.split("/c/")[1] ?? null,
+      formatBrowserTabState: () => "completed",
+      harvestChatGptTab,
+      sessionMatchesTab: () => false,
+    }));
+    vi.doMock("../../src/browser/recoverConversation.js", () => ({
+      recoverConversationTab: vi.fn(),
+    }));
+    vi.doMock("../../src/sessionStore.js", () => ({
+      sessionStore: {
+        readSession: async () => ({
+          ...baseMeta,
+          options: { prompt: "The original session prompt" },
+        }),
+        updateSession,
+        getPaths,
+      },
+    }));
+
+    const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+    await expect(
+      harvestSessionBrowserOutput("sess-recover", {
+        browserTabRef: "explicit-target",
+        quietOutput: true,
+      }),
+    ).resolves.toMatchObject({ conversationId: "alternate-conversation" });
+    expect(harvestChatGptTab).toHaveBeenCalledTimes(1);
+    expect(updateSession).toHaveBeenCalled();
+  });
+
+  test("waits for a paired answer on an explicit alternate tab without matching the old prompt", async () => {
+    vi.useFakeTimers();
+    try {
+      const explicitHarvest = {
+        ...completedHarvest,
+        targetId: "explicit-target",
+        url: "https://chatgpt.com/c/alternate-conversation",
+        conversationId: "alternate-conversation",
+        lastUserText: "A different explicit prompt",
+        lastUserSnippet: "A different explicit prompt",
+      };
+      const harvestChatGptTab = vi
+        .fn()
+        .mockResolvedValueOnce({ ...explicitHarvest, assistantFollowsLatestUser: false })
+        .mockResolvedValueOnce(explicitHarvest);
+
+      vi.doMock("../../src/browser/liveTabs.js", () => ({
+        collectChatGptTabs: vi.fn(),
+        DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+        DEFAULT_REMOTE_CHROME_PORT: 9222,
+        extractConversationIdFromUrl: (url: string) => url.split("/c/")[1] ?? null,
+        formatBrowserTabState: () => "completed",
+        harvestChatGptTab,
+        sessionMatchesTab: () => false,
+      }));
+      vi.doMock("../../src/browser/recoverConversation.js", () => ({
+        recoverConversationTab: vi.fn(),
+      }));
+      vi.doMock("../../src/sessionStore.js", () => ({
+        sessionStore: {
+          readSession: async () => ({
+            ...baseMeta,
+            options: { prompt: "The original session prompt" },
+          }),
+          updateSession: async () => {},
+          getPaths,
+        },
+      }));
+
+      const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+      const result = harvestSessionBrowserOutput("sess-recover", {
+        browserTabRef: "explicit-target",
+        quietOutput: true,
+      });
+      const assertion = expect(result).resolves.toMatchObject({
+        conversationId: "alternate-conversation",
+        assistantFollowsLatestUser: true,
+      });
+      await vi.advanceTimersByTimeAsync(300);
+      await assertion;
+      expect(harvestChatGptTab).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("fails closed without persisting when the latest answer never matches the session prompt", async () => {
     vi.useFakeTimers();
     try {
