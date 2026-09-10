@@ -36,11 +36,18 @@ describe("resumeBrowserSession", () => {
     };
 
     await expect(
-      resumeBrowserSession({}, {}, vi.fn() as BrowserLogger, {
-        signal: cancellation.signal,
-        createTemporaryProfile,
-        launchChrome: launchChrome as never,
-      }),
+      resumeBrowserSession(
+        {},
+        // Windows defaults to the persistent manual-login profile, so pin the
+        // temporary-profile path this test is exercising on every platform.
+        { manualLogin: false },
+        vi.fn() as BrowserLogger,
+        {
+          signal: cancellation.signal,
+          createTemporaryProfile,
+          launchChrome: launchChrome as never,
+        },
+      ),
     ).rejects.toThrow(BrowserRunCancelledError);
 
     expect(launchChrome).not.toHaveBeenCalled();
