@@ -33,6 +33,15 @@ export function shouldExitAfterTopLevelSigint(remainingListenerCount: number): b
   return remainingListenerCount === 0;
 }
 
+export function detachedCancellationExitCode(
+  cancelled: boolean,
+  finalStatus: string | undefined,
+  currentExitCode: NodeJS.Process["exitCode"],
+): NodeJS.Process["exitCode"] {
+  if (!cancelled) return currentExitCode;
+  return finalStatus === "completed" || finalStatus === "partial" ? 0 : 130;
+}
+
 export function stopDetachedWorker(
   workerPid: number,
   kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,

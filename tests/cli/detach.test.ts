@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import {
+  detachedCancellationExitCode,
   shouldDetachSession,
   shouldExitAfterTopLevelSigint,
   stopDetachedWorker,
@@ -129,5 +130,12 @@ describe("shouldDetachSession", () => {
   test("lets a remaining session SIGINT handler finish cancellation", () => {
     expect(shouldExitAfterTopLevelSigint(1)).toBe(false);
     expect(shouldExitAfterTopLevelSigint(0)).toBe(true);
+  });
+
+  test("restores success when completion wins after the parent recorded SIGINT", () => {
+    expect(detachedCancellationExitCode(true, "completed", 130)).toBe(0);
+    expect(detachedCancellationExitCode(true, "partial", 130)).toBe(0);
+    expect(detachedCancellationExitCode(true, "cancelled", 130)).toBe(130);
+    expect(detachedCancellationExitCode(false, "completed", undefined)).toBeUndefined();
   });
 });

@@ -321,7 +321,7 @@ async function executeAssembledBrowserSession({
       outputPath: runOptions.outputPath,
       followUpPrompts: runOptions.browserFollowUps,
       signal,
-      closeOwnedTabOnCancel: true,
+      closeOwnedTabOnCancel: !executionBrowserConfig.keepBrowser,
       runtimeHintCb: async (runtime, modelSelection) => {
         const runtimeWithController = {
           ...runtime,

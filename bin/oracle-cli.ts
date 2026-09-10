@@ -46,6 +46,7 @@ import { copyToClipboard } from "../src/cli/clipboard.js";
 import { isGpt6ProAlias } from "../src/cli/browserConfig.js";
 import { buildMarkdownBundle } from "../src/cli/markdownBundle.js";
 import {
+  detachedCancellationExitCode,
   shouldDetachSession,
   shouldExitAfterTopLevelSigint,
   stopDetachedWorker,
@@ -2629,12 +2630,8 @@ async function attachToDetachedSession(sessionId: string, workerPid: number): Pr
   } finally {
     process.off("SIGINT", cancelWorker);
     await cancellationRequest;
-    if (cancelled) {
-      const finalStatus = (await sessionStore.readSession(sessionId).catch(() => null))?.status;
-      if (finalStatus !== "completed" && finalStatus !== "partial") {
-        process.exitCode = 130;
-      }
-    }
+    const finalStatus = (await sessionStore.readSession(sessionId).catch(() => null))?.status;
+    process.exitCode = detachedCancellationExitCode(cancelled, finalStatus, process.exitCode);
   }
 }
 
