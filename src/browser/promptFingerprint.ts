@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import type { ChromeClient } from "./types.js";
 import { buildConversationTurnListExpression } from "./conversationTurns.js";
 
-export function browserPromptFingerprint(value: unknown, turnIndex: number): string {
+export function browserPromptFingerprint(value: unknown, messageId: string): string {
   return createHash("sha256")
-    .update(JSON.stringify([turnIndex, String(value ?? "").replace(/\r\n?/g, "\n")]))
+    .update(JSON.stringify([messageId, String(value ?? "").replace(/\r\n?/g, "\n")]))
     .digest("hex");
 }
 
@@ -34,15 +34,20 @@ export async function readSubmittedPromptFingerprint(
         for (let index = turns.length - 1; index >= ${baselineTurns}; index--) {
           const turn = turns[index];
           const user = turn.matches('[data-message-author-role="user"]') ? turn : turn.querySelector('[data-message-author-role="user"]');
-          if (user) return { text: user.textContent, turnIndex: index };
+          if (user) return { text: user.textContent, messageId: user.getAttribute('data-message-id') };
         }
         return null;
       })()`,
         returnByValue: true,
       });
       const turn = result.result?.value;
-      if (typeof turn?.text === "string" && turn.text.trim() && Number.isInteger(turn.turnIndex))
-        return browserPromptFingerprint(turn.text, turn.turnIndex);
+      if (
+        typeof turn?.text === "string" &&
+        turn.text.trim() &&
+        typeof turn.messageId === "string" &&
+        turn.messageId.trim()
+      )
+        return browserPromptFingerprint(turn.text, turn.messageId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (

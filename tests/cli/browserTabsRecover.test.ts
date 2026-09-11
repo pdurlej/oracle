@@ -43,6 +43,7 @@ const completedHarvest = {
   assistantFollowsLatestUser: true,
   lastAssistantTurnIndex: 1,
   lastUserTurnIndex: 0,
+  lastUserMessageId: "current-message",
   lastAssistantMarkdown: "## Recovered answer\n\nFull response captured.",
   lastAssistantText: "Recovered answer. Full response captured.",
   lastAssistantSnippet: "Recovered answer.",
@@ -265,6 +266,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
       lastAssistantText: "Older answer",
       lastAssistantMarkdown: "Older answer",
       assistantFollowsLatestUser: paired,
+      lastUserMessageId: "old-message",
     };
     const freshHarvest = {
       ...completedHarvest,
@@ -301,7 +303,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
               ...baseMeta.browser?.runtime,
               submittedPromptHash: browserPromptFingerprint(
                 "Current neutral request with the latest constraints",
-                currentIndex,
+                "current-message",
               ),
             },
           },
@@ -359,7 +361,10 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
               config: { ...baseMeta.browser?.config, inputTimeoutMs: 10_000 },
               runtime: {
                 ...baseMeta.browser?.runtime,
-                submittedPromptHash: browserPromptFingerprint("Current neutral request", 0),
+                submittedPromptHash: browserPromptFingerprint(
+                  "Current neutral request",
+                  "current-message",
+                ),
               },
             },
           }),
@@ -431,7 +436,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
                 submittedPromptHash:
                   submittedCount === undefined
                     ? undefined
-                    : browserPromptFingerprint(finalFollowUp, 0),
+                    : browserPromptFingerprint(finalFollowUp, "current-message"),
               },
             },
           }),
@@ -683,7 +688,10 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
               config: { ...baseMeta.browser?.config, inputTimeoutMs: 750 },
               runtime: {
                 ...baseMeta.browser?.runtime,
-                submittedPromptHash: browserPromptFingerprint("Current neutral request", 0),
+                submittedPromptHash: browserPromptFingerprint(
+                  "Current neutral request",
+                  "current-message",
+                ),
               },
             },
           }),

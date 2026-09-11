@@ -113,7 +113,7 @@ export interface BrowserRuntimeMetadata {
   conversationId?: string;
   /** True after Oracle has submitted the prompt to ChatGPT. */
   promptSubmitted?: boolean;
-  /** Fingerprint of committed user text and turn position; null until commitment is confirmed. */
+  /** Fingerprint of committed user text and stable message ID; null until commitment is confirmed. */
   submittedPromptHash?: string | null;
   /** Latest Deep Research plan captured from ChatGPT's out-of-process iframe. */
   researchPlan?: BrowserResearchPlanMetadata;

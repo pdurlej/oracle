@@ -148,7 +148,7 @@ the newly harvested answer. Existing transcripts and answer logs are preserved.
 
 Implicit harvest also waits for an assistant answer paired with the latest user
 turn, up to the saved browser input timeout. New browser sessions record a
-fingerprint of each rendered, committed user turn and its conversation position
+fingerprint of each rendered, committed user turn and its stable message ID
 before waiting for its answer, including repeated follow-ups. A mismatch preserves the original output; an unconfirmed
 submission requires waiting or explicit tab inspection.
 

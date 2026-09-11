@@ -62,10 +62,11 @@ function harvestMatchesSessionPrompt(
   if (harvested.assistantFollowsLatestUser !== true || !answer?.trim()) return false;
   return (
     fingerprint === undefined ||
-    (typeof harvested.lastUserTurnIndex === "number" &&
+    (typeof harvested.lastUserMessageId === "string" &&
+      harvested.lastUserMessageId.trim().length > 0 &&
       browserPromptFingerprint(
         harvested.lastUserTextRaw ?? harvested.lastUserText,
-        harvested.lastUserTurnIndex,
+        harvested.lastUserMessageId,
       ) === fingerprint)
   );
 }

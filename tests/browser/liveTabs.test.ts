@@ -42,7 +42,12 @@ function makeTab(overrides: Partial<ChatGptTabSummary> = {}): ChatGptTabSummary 
 describe("liveTabs helpers", () => {
   test("keeps speaker labels and controls out of the raw user fingerprint text", () => {
     const text = "if active:\n  run()";
-    const user = new FakeElement("div", { "data-message-author-role": "user" }, [], text);
+    const user = new FakeElement(
+      "div",
+      { "data-message-author-role": "user", "data-message-id": "current-message" },
+      [],
+      text,
+    );
     const speaker = new FakeElement("span", {}, [], "You said:");
     const copy = new FakeElement("button", {}, [], "Copy");
     const turn = new FakeElement(
@@ -70,6 +75,7 @@ describe("liveTabs helpers", () => {
       { href: "https://chatgpt.com/c/test" },
     );
     expect(observed.lastUserTextRaw).toBe(text);
+    expect(observed.lastUserMessageId).toBe("current-message");
   });
 
   test("keeps a visible composer stop control running even behind a hidden legacy control", () => {
