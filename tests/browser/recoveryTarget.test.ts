@@ -124,6 +124,18 @@ test("retires an owned generating tab after cancellation is persisted", async ()
 
   expect(closeTarget).toHaveBeenCalledWith({ targetId: capture.targetId });
 });
+
+test("preserves a kept tab when cancelled metadata still contains its ownership claim", async () => {
+  await sessionStore.updateSession(metadata.id, {
+    status: "cancelled",
+    browser: { ...metadata.browser, config: { keepBrowser: true } },
+  });
+
+  await retireCancelledBrowserTarget(metadata.id, capture, () => {});
+
+  expect(connectToRemoteChromeTarget).not.toHaveBeenCalled();
+  expect(closeTarget).not.toHaveBeenCalled();
+});
 const harvested = (patch: Partial<ChatGptTabSummary> = {}): ChatGptTabSummary => ({
   ...capture,
   url: "https://chatgpt.com/c/recovery",

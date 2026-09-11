@@ -2631,6 +2631,14 @@ async function attachToDetachedSession(sessionId: string, workerPid: number): Pr
     process.off("SIGINT", cancelWorker);
     await cancellationRequest;
     const finalStatus = (await sessionStore.readSession(sessionId).catch(() => null))?.status;
+    if (
+      cancellationRequest &&
+      finalStatus &&
+      ["completed", "partial", "cancelled", "error"].includes(finalStatus)
+    ) {
+      // The parent may publish its request after the worker's final cleanup.
+      await clearDetachedSessionCancellation(await cancellationMarker);
+    }
     process.exitCode = detachedCancellationExitCode(cancelled, finalStatus, process.exitCode);
   }
 }

@@ -149,6 +149,7 @@ async function retireOwnedBrowserTarget(
     if (
       !metadata ||
       metadata.status !== options.terminalStatus ||
+      metadata.browser?.config?.keepBrowser === true ||
       hasOtherLiveBrowserController(metadata) ||
       !matchesOwnedRecoveryTarget(metadata, capture)
     )
