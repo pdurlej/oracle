@@ -7,6 +7,7 @@ import { resolveBrowserConfig } from "../browser/config.js";
 import {
   browserPromptFingerprint,
   normalizeBrowserPromptText,
+  renderLegacyBrowserPrompt,
 } from "../browser/promptFingerprint.js";
 import {
   collectChatGptTabs,
@@ -61,9 +62,26 @@ function normalizePromptText(value: unknown): string {
   return normalizeBrowserPromptText(value);
 }
 
+interface ExpectedBrowserPrompt {
+  text: string | undefined;
+  exact: boolean;
+  fingerprint?: string;
+  renderedText?: string;
+}
+
+function matchesLegacyBrowserPrompt(observed: string, expected: string, exact: boolean): boolean {
+  if (observed === expected) return true;
+  if (exact || !observed.startsWith(`${expected} `)) return false;
+  const suffix = observed.slice(expected.length).trim();
+  if (/^(?:### )?File(?: \d+)?: /.test(suffix)) return true;
+  return /^The attached attachments-bundle(?:-[\w.-]+)?\.zip contains [1-9]\d* selected files? with relative paths preserved\. Extract it into a temporary directory, then inspect the resulting file tree with filesystem and search tools before answering\.$/.test(
+    suffix,
+  );
+}
+
 function harvestMatchesSessionPrompt(
   harvested: ChatGptTabSummary,
-  expectedPrompt: { text: string | undefined; exact: boolean; fingerprint?: string },
+  expectedPrompt: ExpectedBrowserPrompt,
 ): boolean {
   const assistantText = harvested.lastAssistantMarkdown ?? harvested.lastAssistantText;
   if (harvested.assistantFollowsLatestUser !== true || !assistantText?.trim()) {
@@ -79,20 +97,20 @@ function harvestMatchesSessionPrompt(
   if (!expected) {
     return true;
   }
-  const observed = normalizePromptText(harvested.lastUserText);
-  if (!observed) {
-    return false;
-  }
-  return (
-    observed === expected || (!expectedPrompt.exact && observed.startsWith(`${expected} ### File `))
+  const observedVariants = [harvested.lastUserText, harvested.lastUserVisibleText]
+    .map(normalizePromptText)
+    .filter(Boolean);
+  const expectedVariants = [expected, expectedPrompt.renderedText].filter((text): text is string =>
+    Boolean(text),
+  );
+  return observedVariants.some((observed) =>
+    expectedVariants.some((candidate) =>
+      matchesLegacyBrowserPrompt(observed, candidate, expectedPrompt.exact),
+    ),
   );
 }
 
-function expectedLatestUserPrompt(meta: SessionMetadata): {
-  text: string | undefined;
-  exact: boolean;
-  fingerprint?: string;
-} {
+function expectedLatestUserPrompt(meta: SessionMetadata): ExpectedBrowserPrompt {
   const fingerprint = meta.browser?.runtime?.submittedPromptHash;
   if (fingerprint === null)
     throw new Error(
@@ -120,9 +138,11 @@ async function harvestSessionPrompt(
   options: Parameters<typeof harvestChatGptTab>[0],
   requireSessionPrompt = true,
 ): Promise<ChatGptTabSummary> {
-  const expectedPrompt = requireSessionPrompt
+  const expectedPrompt: ExpectedBrowserPrompt = requireSessionPrompt
     ? expectedLatestUserPrompt(meta)
     : { text: undefined, exact: false };
+  if (expectedPrompt.text)
+    expectedPrompt.renderedText = renderLegacyBrowserPrompt(expectedPrompt.text);
   const freshnessTimeoutMs = resolveBrowserConfig(meta.browser?.config).inputTimeoutMs;
   const deadline = Date.now() + freshnessTimeoutMs;
   let harvested = await harvestChatGptTab(options);

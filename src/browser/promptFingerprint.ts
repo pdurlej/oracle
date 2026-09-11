@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
+import { render } from "markdansi";
 import type { ChromeClient } from "./types.js";
 import { buildConversationTurnListExpression } from "./conversationTurns.js";
 
@@ -8,6 +10,25 @@ export function normalizeBrowserPromptText(value: unknown): string {
     .replace(/`([^`]*)`/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function renderLegacyBrowserPrompt(value: string): string {
+  // OSC links retain their labels without appending destinations to the displayed text.
+  const rendered = render(value, {
+    color: true,
+    hyperlinks: true,
+    wrap: false,
+    codeBox: false,
+    codeGutter: false,
+    codeWrap: false,
+    quotePrefix: "",
+    tableBorder: "none",
+    tablePadding: 0,
+    tableTruncate: false,
+  });
+  return normalizeBrowserPromptText(
+    stripVTControlCharacters(rendered).replace(/^\s*(?:[-+*]|\d+[.)])\s+/gm, ""),
+  );
 }
 
 export function browserPromptFingerprint(value: unknown): string {

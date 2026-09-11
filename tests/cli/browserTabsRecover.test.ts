@@ -405,7 +405,13 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
             },
             browser: {
               ...baseMeta.browser,
-              runtime: { ...baseMeta.browser?.runtime, submittedPromptHash: submittedCount === undefined ? undefined : browserPromptFingerprint(finalFollowUp) },
+              runtime: {
+                ...baseMeta.browser?.runtime,
+                submittedPromptHash:
+                  submittedCount === undefined
+                    ? undefined
+                    : browserPromptFingerprint(finalFollowUp),
+              },
             },
           }),
           updateSession: async () => {},
@@ -421,11 +427,15 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     },
   );
 
-  test("matches initial recovery against the stored system and user prompt prefix", async () => {
+  test.each([
+    "### File 1: example.ts\n```typescript\nconst example = 1;\n```",
+    "File 1: example.ts\nconst example = 1;",
+    "The attached `attachments-bundle.zip` contains 2 selected files with relative paths preserved. Extract it into a temporary directory, then inspect the resulting file tree with filesystem and search tools before answering.",
+    "The attached attachments-bundle-1.zip contains 1 selected file with relative paths preserved. Extract it into a temporary directory, then inspect the resulting file tree with filesystem and search tools before answering.",
+  ])("matches established legacy file context: %s", async (contextSuffix) => {
     const harvestChatGptTab = vi.fn().mockResolvedValue({
       ...completedHarvest,
-      lastUserText:
-        "Use the public context only\n\nInitial neutral request\n\n### File 1: example.ts\n```typescript\nconst example = 1;\n```",
+      lastUserText: `Use the public context only\n\nInitial neutral request\n\n${contextSuffix}`,
       lastUserSnippet: "Use the public context only",
     });
 
@@ -462,11 +472,18 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     expect(result.lastAssistantMarkdown).toBe(completedHarvest.lastAssistantMarkdown);
   });
 
-  test("matches a language-tagged fenced prompt after the DOM inspector collapses whitespace", async () => {
+  test.each([
+    ["Explain\n```python\nprint(1)\n```", "Explain python print(1)"],
+    ["# Heading\n\n**Important** [spec](https://example.com)", "Heading\nImportant spec"],
+    ["- Alpha\n- Beta", "Alpha\nBeta"],
+    ["1. Alpha\n2. Beta", "Alpha\nBeta"],
+    ["> Quote\n\n*Emphasis*", "Quote\nEmphasis"],
+  ])("matches legacy Markdown source: %s", async (sourcePrompt, renderedPrompt) => {
     const harvestChatGptTab = vi.fn().mockResolvedValue({
       ...completedHarvest,
-      lastUserText: "Explain python print(1)",
-      lastUserSnippet: "Explain python print(1)",
+      lastUserText: renderedPrompt.replace(/\n/g, ""),
+      lastUserVisibleText: renderedPrompt,
+      lastUserSnippet: renderedPrompt,
     });
 
     vi.doMock("../../src/browser/liveTabs.js", () => ({
@@ -485,7 +502,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
       sessionStore: {
         readSession: async () => ({
           ...baseMeta,
-          options: { prompt: "Explain\n```python\nprint(1)\n```" },
+          options: { prompt: sourcePrompt },
         }),
         updateSession: async () => {},
         getPaths,
@@ -495,7 +512,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
     await expect(
       harvestSessionBrowserOutput("sess-recover", { quietOutput: true }),
-    ).resolves.toMatchObject({ lastUserText: "Explain python print(1)" });
+    ).resolves.toMatchObject({ lastUserVisibleText: renderedPrompt });
     expect(harvestChatGptTab).toHaveBeenCalledTimes(1);
   });
 
@@ -601,57 +618,58 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     }
   });
 
-  test.each(["An older neutral request", "Current neutral requester", "Current neutral request about something else"])(
-    "fails closed without persisting a mismatched prompt: %s",
-    async (observedPrompt) => {
-      vi.useFakeTimers();
-      try {
-        const harvestChatGptTab = vi.fn().mockResolvedValue({
-          ...completedHarvest,
-          lastUserText: observedPrompt,
-          lastUserSnippet: observedPrompt,
-          lastAssistantText: "Older answer",
-          lastAssistantMarkdown: "Older answer",
-        });
-        const updateSession = vi.fn(async () => {});
+  test.each([
+    "An older neutral request",
+    "Current neutral requester",
+    "Current neutral request about something else",
+  ])("fails closed without persisting a mismatched prompt: %s", async (observedPrompt) => {
+    vi.useFakeTimers();
+    try {
+      const harvestChatGptTab = vi.fn().mockResolvedValue({
+        ...completedHarvest,
+        lastUserText: observedPrompt,
+        lastUserSnippet: observedPrompt,
+        lastAssistantText: "Older answer",
+        lastAssistantMarkdown: "Older answer",
+      });
+      const updateSession = vi.fn(async () => {});
 
-        vi.doMock("../../src/browser/liveTabs.js", () => ({
-          collectChatGptTabs: vi.fn(),
-          DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
-          DEFAULT_REMOTE_CHROME_PORT: 9222,
-          extractConversationIdFromUrl: () => "saved-conversation",
-          formatBrowserTabState: () => "completed",
-          harvestChatGptTab,
-          sessionMatchesTab: () => false,
-        }));
-        vi.doMock("../../src/browser/recoverConversation.js", () => ({
-          recoverConversationTab: vi.fn(),
-        }));
-        vi.doMock("../../src/sessionStore.js", () => ({
-          sessionStore: {
-            readSession: async () => ({
-              ...baseMeta,
-              options: { prompt: "Current neutral request" },
-              browser: {
-                ...baseMeta.browser,
-                config: { ...baseMeta.browser?.config, inputTimeoutMs: 750 },
-              },
-            }),
-            updateSession,
-            getPaths,
-          },
-        }));
+      vi.doMock("../../src/browser/liveTabs.js", () => ({
+        collectChatGptTabs: vi.fn(),
+        DEFAULT_REMOTE_CHROME_HOST: "127.0.0.1",
+        DEFAULT_REMOTE_CHROME_PORT: 9222,
+        extractConversationIdFromUrl: () => "saved-conversation",
+        formatBrowserTabState: () => "completed",
+        harvestChatGptTab,
+        sessionMatchesTab: () => false,
+      }));
+      vi.doMock("../../src/browser/recoverConversation.js", () => ({
+        recoverConversationTab: vi.fn(),
+      }));
+      vi.doMock("../../src/sessionStore.js", () => ({
+        sessionStore: {
+          readSession: async () => ({
+            ...baseMeta,
+            options: { prompt: "Current neutral request" },
+            browser: {
+              ...baseMeta.browser,
+              config: { ...baseMeta.browser?.config, inputTimeoutMs: 750 },
+            },
+          }),
+          updateSession,
+          getPaths,
+        },
+      }));
 
-        const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
-        const promise = harvestSessionBrowserOutput("sess-recover", { quietOutput: true });
-        const assertion = expect(promise).rejects.toThrow(/refusing to harvest stale output/i);
-        await vi.advanceTimersByTimeAsync(1_000);
-        await assertion;
-        expect(harvestChatGptTab).toHaveBeenCalledTimes(4);
-        expect(updateSession).not.toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
-    },
-  );
+      const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
+      const promise = harvestSessionBrowserOutput("sess-recover", { quietOutput: true });
+      const assertion = expect(promise).rejects.toThrow(/refusing to harvest stale output/i);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await assertion;
+      expect(harvestChatGptTab).toHaveBeenCalledTimes(4);
+      expect(updateSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
