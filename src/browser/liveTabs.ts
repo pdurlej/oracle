@@ -52,6 +52,7 @@ export interface ChatGptTabSummary {
   lastUserTurnIndex?: number;
   lastAssistantSnippet: string;
   lastUserText: string;
+  lastUserTextRaw?: string;
   lastUserSnippet: string;
   focused: boolean;
   visibilityState: string;
@@ -264,6 +265,7 @@ function buildTabInspectionExpression(): string {
         lastAssistantTurnIndex,
         lastUserTurnIndex,
         lastUserText,
+        lastUserTextRaw: lastUserTurn?.textContent ?? '',
         visibilityState: document.visibilityState,
         focused: Boolean(document.hasFocus?.()),
       };
@@ -334,6 +336,7 @@ export async function inspectChatGptTab(
       lastAssistantTurnIndex?: number;
       lastUserTurnIndex?: number;
       lastUserText?: string;
+      lastUserTextRaw?: string;
       visibilityState?: string;
       focused?: boolean;
     };
@@ -380,6 +383,7 @@ export async function inspectChatGptTab(
           : undefined,
       lastAssistantSnippet: trimToSnippet(lastAssistantText),
       lastUserText,
+      lastUserTextRaw: info.lastUserTextRaw,
       lastUserSnippet: trimToSnippet(lastUserText),
       focused: Boolean(info.focused),
       visibilityState: typeof info.visibilityState === "string" ? info.visibilityState : "",
@@ -612,6 +616,7 @@ export async function harvestChatGptTab(
       harvested.authenticated = followup.authenticated;
       harvested.loginButtonExists = followup.loginButtonExists;
       harvested.lastUserText = followup.lastUserText;
+      harvested.lastUserTextRaw = followup.lastUserTextRaw;
       harvested.lastUserSnippet = followup.lastUserSnippet;
       harvested.assistantFollowsLatestUser = followup.assistantFollowsLatestUser;
       harvested.lastAssistantTurnIndex = followup.lastAssistantTurnIndex;

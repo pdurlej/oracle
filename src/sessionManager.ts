@@ -113,6 +113,8 @@ export interface BrowserRuntimeMetadata {
   conversationId?: string;
   /** True after Oracle has submitted the prompt to ChatGPT. */
   promptSubmitted?: boolean;
+  /** Fingerprint of the exact most recently submitted composer text. */
+  submittedPromptHash?: string | null;
   /** Latest Deep Research plan captured from ChatGPT's out-of-process iframe. */
   researchPlan?: BrowserResearchPlanMetadata;
   /** PID of the controller process that launched this browser run. Helps detect orphaned sessions. */

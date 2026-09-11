@@ -5,6 +5,10 @@ import { sessionStore } from "../sessionStore.js";
 import type { SessionMetadata } from "../sessionStore.js";
 import { resolveBrowserConfig } from "../browser/config.js";
 import {
+  browserPromptFingerprint,
+  normalizeBrowserPromptText,
+} from "../browser/promptFingerprint.js";
+import {
   collectChatGptTabs,
   DEFAULT_REMOTE_CHROME_HOST,
   DEFAULT_REMOTE_CHROME_PORT,
@@ -54,19 +58,22 @@ function finishRecoveredChrome(
 }
 
 function normalizePromptText(value: unknown): string {
-  let text = String(value ?? "").toLowerCase();
-  text = text.replace(/```/g, " ");
-  text = text.replace(/`([^`]*)`/g, "$1");
-  return text.replace(/\s+/g, " ").trim();
+  return normalizeBrowserPromptText(value);
 }
 
 function harvestMatchesSessionPrompt(
   harvested: ChatGptTabSummary,
-  expectedPrompt: { text: string | undefined; exact: boolean },
+  expectedPrompt: { text: string | undefined; exact: boolean; fingerprint?: string },
 ): boolean {
   const assistantText = harvested.lastAssistantMarkdown ?? harvested.lastAssistantText;
   if (harvested.assistantFollowsLatestUser !== true || !assistantText?.trim()) {
     return false;
+  }
+  if (expectedPrompt.fingerprint) {
+    return (
+      browserPromptFingerprint(harvested.lastUserTextRaw ?? harvested.lastUserText) ===
+      expectedPrompt.fingerprint
+    );
   }
   const expected = normalizePromptText(expectedPrompt.text);
   if (!expected) {
@@ -76,21 +83,29 @@ function harvestMatchesSessionPrompt(
   if (!observed) {
     return false;
   }
-  return expectedPrompt.exact ? observed === expected : observed.startsWith(expected);
+  return (
+    observed === expected || (!expectedPrompt.exact && observed.startsWith(`${expected} ### File `))
+  );
 }
 
 function expectedLatestUserPrompt(meta: SessionMetadata): {
   text: string | undefined;
   exact: boolean;
+  fingerprint?: string;
 } {
+  const fingerprint = meta.browser?.runtime?.submittedPromptHash;
+  if (fingerprint === null)
+    throw new Error(
+      "The submitted browser turn was not confirmed before interruption; use an explicit --browser-tab to inspect it.",
+    );
+  if (fingerprint) return { text: undefined, exact: true, fingerprint };
   const followUps = meta.options?.browserFollowUps;
   if (Array.isArray(followUps)) {
-    for (let index = followUps.length - 1; index >= 0; index -= 1) {
-      const followUp = followUps[index];
-      if (typeof followUp === "string" && followUp.trim()) {
-        return { text: followUp.trim(), exact: true };
-      }
-    }
+    const prompts = followUps
+      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      .map((value) => value.trim());
+    const finalPrompt = prompts.at(-1);
+    if (finalPrompt) return { text: finalPrompt, exact: true };
   }
   const system = typeof meta.options?.system === "string" ? meta.options.system.trim() : "";
   const prompt = typeof meta.options?.prompt === "string" ? meta.options.prompt.trim() : "";

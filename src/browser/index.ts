@@ -1,3 +1,4 @@
+import { readSubmittedPromptFingerprint } from "./promptFingerprint.js";
 import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -1133,6 +1134,7 @@ async function runBrowserModeInternal(
   let lastTargetId: string | undefined;
   let lastUrl: string | undefined;
   let promptSubmitted = false;
+  let submittedPromptHash: string | null | undefined;
   let ownedRecoveryTarget: BrowserRunResult["ownedRecoveryTarget"];
   const targetClaimId = randomUUID();
   let modelSelectionEvidence: BrowserModelSelectionEvidence | undefined;
@@ -1153,6 +1155,7 @@ async function runBrowserModeInternal(
       tabUrl: lastUrl,
       conversationId,
       promptSubmitted,
+      submittedPromptHash,
       ownedRecoveryTarget,
       userDataDir,
       controllerPid: process.pid,
@@ -1172,10 +1175,8 @@ async function runBrowserModeInternal(
     }
   };
   const markPromptSubmitted = async (): Promise<void> => {
-    if (promptSubmitted) {
-      return;
-    }
     promptSubmitted = true;
+    submittedPromptHash = null;
     await emitRuntimeHint();
     void conversationUrlMonitor?.schedule("post-submit", config.timeoutMs ?? 120_000);
   };
@@ -1463,6 +1464,7 @@ async function runBrowserModeInternal(
                     ? extractConversationIdFromUrl(liveness.matchedUrl ?? lastUrl ?? "")
                     : undefined,
                 promptSubmitted,
+                submittedPromptHash,
                 ownedRecoveryTarget,
                 controllerPid: process.pid,
                 researchPlan,
@@ -1886,6 +1888,11 @@ async function runBrowserModeInternal(
         state: providerState,
       });
       await markPromptSubmitted();
+      const renderedPromptHash = await readSubmittedPromptFingerprint(Runtime, baselineTurns);
+      if (renderedPromptHash) {
+        submittedPromptHash = renderedPromptHash;
+        await emitRuntimeHint();
+      }
       const providerBaselineTurns = providerState.baselineTurns;
       if (typeof providerBaselineTurns === "number" && Number.isFinite(providerBaselineTurns)) {
         baselineTurns = providerBaselineTurns;
@@ -2038,6 +2045,7 @@ async function runBrowserModeInternal(
         tabUrl: lastUrl,
         conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
         promptSubmitted,
+        submittedPromptHash,
         ownedRecoveryTarget,
         controllerPid: process.pid,
         researchPlan,
@@ -2142,6 +2150,7 @@ async function runBrowserModeInternal(
               tabUrl: lastUrl,
               conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
               promptSubmitted,
+              submittedPromptHash,
               ownedRecoveryTarget,
               controllerPid: process.pid,
             },
@@ -2232,6 +2241,7 @@ async function runBrowserModeInternal(
               tabUrl: lastUrl,
               conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
               promptSubmitted,
+              submittedPromptHash,
               ownedRecoveryTarget,
               controllerPid: process.pid,
             };
@@ -2490,6 +2500,7 @@ async function runBrowserModeInternal(
             tabUrl: lastUrl,
             conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
             promptSubmitted,
+            submittedPromptHash,
             ownedRecoveryTarget,
             controllerPid: process.pid,
           },
@@ -2563,6 +2574,7 @@ async function runBrowserModeInternal(
       tabUrl: lastUrl,
       conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
       promptSubmitted,
+      submittedPromptHash,
       ownedRecoveryTarget,
       controllerPid: process.pid,
     };
@@ -2595,6 +2607,7 @@ async function runBrowserModeInternal(
         chromeTargetId: lastTargetId,
         tabUrl: lastUrl,
         promptSubmitted,
+        submittedPromptHash,
         ownedRecoveryTarget,
         controllerPid: process.pid,
       };
@@ -2672,6 +2685,7 @@ async function runBrowserModeInternal(
               ? extractConversationIdFromUrl(liveness.matchedUrl ?? lastUrl ?? "")
               : undefined,
           promptSubmitted,
+          submittedPromptHash,
           ownedRecoveryTarget,
           controllerPid: process.pid,
           researchPlan,
@@ -3190,6 +3204,7 @@ async function runRemoteBrowserMode(
   let tabLease: BrowserTabLease | null = null;
   let lastUrl: string | undefined;
   let promptSubmitted = false;
+  let submittedPromptHash: string | null | undefined;
   let ownedRecoveryTarget: BrowserRunResult["ownedRecoveryTarget"];
   const targetClaimId = randomUUID();
   let modelSelectionEvidence: BrowserModelSelectionEvidence | undefined;
@@ -3212,6 +3227,7 @@ async function runRemoteBrowserMode(
           tabUrl: lastUrl,
           conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
           promptSubmitted,
+          submittedPromptHash,
           ownedRecoveryTarget,
           controllerPid: process.pid,
           researchPlan,
@@ -3230,10 +3246,8 @@ async function runRemoteBrowserMode(
     }
   };
   const markPromptSubmitted = async (): Promise<void> => {
-    if (promptSubmitted) {
-      return;
-    }
     promptSubmitted = true;
+    submittedPromptHash = null;
     await emitRuntimeHint();
     void conversationUrlMonitor?.schedule("post-submit", config.timeoutMs ?? 120_000);
   };
@@ -3533,6 +3547,11 @@ async function runRemoteBrowserMode(
         state: providerState,
       });
       await markPromptSubmitted();
+      const renderedPromptHash = await readSubmittedPromptFingerprint(Runtime, baselineTurns);
+      if (renderedPromptHash) {
+        submittedPromptHash = renderedPromptHash;
+        await emitRuntimeHint();
+      }
       const providerBaselineTurns = providerState.baselineTurns;
       if (typeof providerBaselineTurns === "number" && Number.isFinite(providerBaselineTurns)) {
         baselineTurns = providerBaselineTurns;
@@ -3647,6 +3666,7 @@ async function runRemoteBrowserMode(
         tabUrl: lastUrl,
         conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
         promptSubmitted,
+        submittedPromptHash,
         ownedRecoveryTarget,
         controllerPid: process.pid,
         researchPlan,
@@ -3748,6 +3768,7 @@ async function runRemoteBrowserMode(
               tabUrl: lastUrl,
               conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
               promptSubmitted,
+              submittedPromptHash,
               ownedRecoveryTarget,
               controllerPid: process.pid,
             },
@@ -3836,6 +3857,7 @@ async function runRemoteBrowserMode(
               tabUrl: lastUrl,
               conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
               promptSubmitted,
+              submittedPromptHash,
               ownedRecoveryTarget,
               controllerPid: process.pid,
             };
@@ -4049,6 +4071,7 @@ async function runRemoteBrowserMode(
             tabUrl: lastUrl,
             conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
             promptSubmitted,
+            submittedPromptHash,
             ownedRecoveryTarget,
             controllerPid: process.pid,
           },
@@ -4118,6 +4141,7 @@ async function runRemoteBrowserMode(
       tabUrl: lastUrl,
       conversationId: lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined,
       promptSubmitted,
+      submittedPromptHash,
       ownedRecoveryTarget,
       artifacts: savedArtifacts,
       generatedImages: imageArtifacts.generatedImages,
@@ -4169,6 +4193,7 @@ async function runRemoteBrowserMode(
             ? extractConversationIdFromUrl(liveness.matchedUrl ?? lastUrl ?? "")
             : undefined,
         promptSubmitted,
+        submittedPromptHash,
         ownedRecoveryTarget,
         controllerPid: process.pid,
         researchPlan,

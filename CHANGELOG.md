@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-- Browser: wait for an assistant answer paired with the session's latest prompt before harvesting, using the configured input timeout instead of persisting stale output.
-
 ## 0.20.0 - 2026-09-07
 
 **Highlights:** GPT-6 Astra API and ChatGPT Latest support, explicit Web Search, and safe cleanup after browser recovery.
