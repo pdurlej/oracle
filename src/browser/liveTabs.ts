@@ -265,7 +265,8 @@ function buildTabInspectionExpression(): string {
         lastAssistantTurnIndex,
         lastUserTurnIndex,
         lastUserText,
-        lastUserTextRaw: lastUserTurn?.textContent ?? '',
+        lastUserTextRaw: (lastUserTurn?.matches?.('[data-message-author-role="user"]')
+          ? lastUserTurn : lastUserTurn?.querySelector?.('[data-message-author-role="user"]'))?.textContent,
         visibilityState: document.visibilityState,
         focused: Boolean(document.hasFocus?.()),
       };

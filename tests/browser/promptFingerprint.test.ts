@@ -35,3 +35,14 @@ test("captures the rendered committed user turn rather than Markdown source", as
     ),
   );
 });
+
+test("waits for asynchronous user-turn mounting within the configured input timeout", async () => {
+  let calls = 0;
+  const runtime = {
+    evaluate: async () => ({ result: { value: ++calls === 1 ? null : "Mounted user prompt" } }),
+  } as unknown as ChromeClient["Runtime"];
+  await expect(readSubmittedPromptFingerprint(runtime, 0, 1000)).resolves.toBe(
+    browserPromptFingerprint("Mounted user prompt"),
+  );
+  expect(calls).toBe(2);
+});

@@ -1888,7 +1888,11 @@ async function runBrowserModeInternal(
         state: providerState,
       });
       await markPromptSubmitted();
-      const renderedPromptHash = await readSubmittedPromptFingerprint(Runtime, baselineTurns);
+      const renderedPromptHash = await readSubmittedPromptFingerprint(
+        Runtime,
+        baselineTurns,
+        config.inputTimeoutMs,
+      );
       if (renderedPromptHash) {
         submittedPromptHash = renderedPromptHash;
         await emitRuntimeHint();
@@ -3547,7 +3551,11 @@ async function runRemoteBrowserMode(
         state: providerState,
       });
       await markPromptSubmitted();
-      const renderedPromptHash = await readSubmittedPromptFingerprint(Runtime, baselineTurns);
+      const renderedPromptHash = await readSubmittedPromptFingerprint(
+        Runtime,
+        baselineTurns,
+        config.inputTimeoutMs,
+      );
       if (renderedPromptHash) {
         submittedPromptHash = renderedPromptHash;
         await emitRuntimeHint();

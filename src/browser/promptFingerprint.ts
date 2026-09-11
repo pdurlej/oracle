@@ -19,11 +19,14 @@ export function browserPromptFingerprint(value: unknown): string {
 export async function readSubmittedPromptFingerprint(
   runtime: ChromeClient["Runtime"],
   baselineTurns: number | null,
+  timeoutMs = 0,
 ): Promise<string | undefined> {
   if (baselineTurns === null) return undefined;
-  try {
-    const result = await runtime.evaluate({
-      expression: `(() => {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    try {
+      const result = await runtime.evaluate({
+        expression: `(() => {
         const turns = ${buildConversationTurnListExpression()};
         for (let index = turns.length - 1; index >= ${baselineTurns}; index--) {
           const turn = turns[index];
@@ -32,11 +35,14 @@ export async function readSubmittedPromptFingerprint(
         }
         return null;
       })()`,
-      returnByValue: true,
-    });
-    const text = result.result?.value;
-    return typeof text === "string" && text.trim() ? browserPromptFingerprint(text) : undefined;
-  } catch {
-    return undefined;
+        returnByValue: true,
+      });
+      const text = result.result?.value;
+      if (typeof text === "string" && text.trim()) return browserPromptFingerprint(text);
+    } catch {
+      return undefined;
+    }
+    if (Date.now() >= deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, deadline - Date.now())));
   }
 }
