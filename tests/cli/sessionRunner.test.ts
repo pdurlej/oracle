@@ -1349,6 +1349,58 @@ describe("performSessionRun", () => {
     expect(result).toBe(expected);
   });
 
+  test.each([null, "previous-turn-fingerprint"])(
+    "preserves pending fingerprint state after preparation fails (previous: %s)",
+    async (submittedPromptHash) => {
+      vi.mocked(runBrowserSessionExecution).mockRejectedValueOnce(
+        new BrowserAutomationError("preparation failed", { stage: "execute-browser" }),
+      );
+      const sessionMeta = {
+        ...baseSessionMeta,
+        browser: {
+          config: { desiredModel: "Old Pro" },
+          runtime: {
+            submittedPromptHash,
+            promptSubmitted: true,
+            tabUrl: "https://chatgpt.com/c/old",
+          },
+          modelSelection: {
+            requestedModel: "Old Pro",
+            resolvedLabel: "Old Pro",
+            strategy: "select" as const,
+            status: "already-selected" as const,
+            verified: true,
+            source: "chatgpt-model-picker" as const,
+            capturedAt: "2026-07-02T00:00:00.000Z",
+          },
+        },
+      };
+
+      await expect(
+        performSessionRun({
+          sessionMeta,
+          runOptions: baseRunOptions,
+          mode: "browser",
+          browserConfig: { chromePath: null },
+          cwd: "/tmp",
+          log,
+          write,
+          version: cliVersion,
+        }),
+      ).rejects.toThrow("preparation failed");
+
+      const updates = sessionStoreMock.updateSession.mock.calls;
+      expect(updates[0]?.[1]?.status).toBe("running");
+      expect(updates.at(-1)?.[1]?.status).toBe("error");
+      for (const update of [updates[0]?.[1], updates.at(-1)?.[1]]) {
+        expect(update?.browser).toEqual({
+          config: { chromePath: null },
+          runtime: { submittedPromptHash: null },
+        });
+      }
+    },
+  );
+
   test("records metadata when browser automation fails", async () => {
     const automationError = new BrowserAutomationError("automation failed", {
       stage: "execute-browser",
@@ -1402,58 +1454,6 @@ describe("performSessionRun", () => {
     expect(logLines).not.toContain("--engine api");
     expect(logLines).not.toContain("This run did not return cleanly");
   });
-
-  test.each([null, "previous-turn-fingerprint"])(
-    "preserves pending fingerprint state after preparation fails (previous: %s)",
-    async (submittedPromptHash) => {
-      vi.mocked(runBrowserSessionExecution).mockRejectedValueOnce(
-        new BrowserAutomationError("preparation failed", { stage: "execute-browser" }),
-      );
-      const sessionMeta = {
-        ...baseSessionMeta,
-        browser: {
-          config: { desiredModel: "Old Pro" },
-          runtime: {
-            submittedPromptHash,
-            promptSubmitted: true,
-            tabUrl: "https://chatgpt.com/c/old",
-          },
-          modelSelection: {
-            requestedModel: "Old Pro",
-            resolvedLabel: "Old Pro",
-            strategy: "select" as const,
-            status: "already-selected" as const,
-            verified: true,
-            source: "chatgpt-model-picker" as const,
-            capturedAt: "2026-07-02T00:00:00.000Z",
-          },
-        },
-      };
-
-      await expect(
-        performSessionRun({
-          sessionMeta,
-          runOptions: baseRunOptions,
-          mode: "browser",
-          browserConfig: { chromePath: null },
-          cwd: "/tmp",
-          log,
-          write,
-          version: cliVersion,
-        }),
-      ).rejects.toThrow("preparation failed");
-
-      const updates = sessionStoreMock.updateSession.mock.calls;
-      expect(updates[0]?.[1]?.status).toBe("running");
-      expect(updates.at(-1)?.[1]?.status).toBe("error");
-      for (const update of [updates[0]?.[1], updates.at(-1)?.[1]]) {
-        expect(update?.browser).toEqual({
-          config: { chromePath: null },
-          runtime: { submittedPromptHash: null },
-        });
-      }
-    },
-  );
 
   test("preserves persisted runtime hints when browser automation fails without runtime details", async () => {
     const automationError = new BrowserAutomationError(
