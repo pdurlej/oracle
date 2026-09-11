@@ -2,28 +2,58 @@ import { expect, test } from "vitest";
 import {
   browserPromptFingerprint,
   readSubmittedPromptFingerprint,
-  resolveSubmittedPromptBaseline,
+  readUserMessageIds,
 } from "../../src/browser/promptFingerprint.js";
 import type { ChromeClient } from "../../src/browser/types.js";
 
-test("recovers the submitted user turn when the first count was unavailable and an answer is already present", async () => {
-  const turns = ["Old user", null, "New committed user", null].map((text) => ({
-    matches: () => false,
-    querySelector: () =>
-      text === null ? null : { textContent: text, getAttribute: () => "current-message" },
-  }));
+test("captures a new message when earlier turns unmount during submission", async () => {
+  const user = (text: string, id: string) => ({ textContent: text, getAttribute: () => id });
+  const oldUsers = [user("First", "old-1"), user("Continue", "old-2")];
+  let users = oldUsers;
   const runtime = {
     evaluate: async ({ expression }: { expression: string }) => ({
       result: {
-        value: new Function("document", `return ${expression}`)({ querySelectorAll: () => turns }),
+        value: new Function("document", `return ${expression}`)({
+          querySelectorAll: (selector: string) =>
+            selector === '[data-message-author-role="user"]'
+              ? users
+              : users.map((message) => ({ matches: () => false, querySelector: () => message })),
+        }),
       },
     }),
   } as unknown as ChromeClient["Runtime"];
-  const baseline = resolveSubmittedPromptBaseline(null, 3);
-  await expect(readSubmittedPromptFingerprint(runtime, baseline)).resolves.toBe(
-    browserPromptFingerprint("New committed user", "current-message"),
+  const previous = await readUserMessageIds(runtime);
+  expect(previous).toEqual(["old-1", "old-2"]);
+  expect(await readSubmittedPromptFingerprint(runtime, previous)).toBeUndefined();
+  users = [oldUsers[1], user("Continue", "current-message")];
+  expect(await readSubmittedPromptFingerprint(runtime, previous)).toBe(
+    browserPromptFingerprint("Continue", "current-message"),
   );
-  expect(resolveSubmittedPromptBaseline(2, 3)).toBe(2);
+  expect(await readSubmittedPromptFingerprint(runtime, undefined)).toBeUndefined();
+});
+
+test("waits for pre-existing user message IDs to hydrate", async () => {
+  let calls = 0;
+  const runtime = {
+    evaluate: async () => ({ result: { value: ++calls === 1 ? [null] : ["old-message"] } }),
+  } as unknown as ChromeClient["Runtime"];
+  expect(await readUserMessageIds(runtime, 1000)).toEqual(["old-message"]);
+  expect(calls).toBe(2);
+});
+
+test("does not confuse an existing identical prompt with the next submission", async () => {
+  let calls = 0;
+  const runtime = {
+    evaluate: async () => ({
+      result: {
+        value: { text: "Continue", messageId: ++calls === 1 ? "old-message" : "current-message" },
+      },
+    }),
+  } as unknown as ChromeClient["Runtime"];
+  expect(await readSubmittedPromptFingerprint(runtime, ["old-message"], 1000)).toBe(
+    browserPromptFingerprint("Continue", "current-message"),
+  );
+  expect(calls).toBe(2);
 });
 
 test("fingerprints preserve case and meaningful indentation", () => {
@@ -55,9 +85,9 @@ test("preserves committed identity when earlier conversation turns are unmounted
       },
     }),
   } as unknown as ChromeClient["Runtime"];
-  const before = await readSubmittedPromptFingerprint(runtime, 20);
+  const before = await readSubmittedPromptFingerprint(runtime, []);
   turns = [current];
-  expect(await readSubmittedPromptFingerprint(runtime, 0)).toBe(before);
+  expect(await readSubmittedPromptFingerprint(runtime, [])).toBe(before);
   expect(before).toBe(browserPromptFingerprint("Continue", "current-message"));
 });
 
@@ -68,7 +98,7 @@ test("waits for stable message identity instead of fingerprinting text alone", a
       result: { value: { text: "Continue", messageId: ++calls === 1 ? null : "current-message" } },
     }),
   } as unknown as ChromeClient["Runtime"];
-  expect(await readSubmittedPromptFingerprint(runtime, 0, 1000)).toBe(
+  expect(await readSubmittedPromptFingerprint(runtime, [], 1000)).toBe(
     browserPromptFingerprint("Continue", "current-message"),
   );
   expect(calls).toBe(2);
@@ -86,10 +116,12 @@ test("captures the rendered committed user turn rather than Markdown source", as
     }),
   } as unknown as ChromeClient["Runtime"];
 
-  await expect(readSubmittedPromptFingerprint(runtime, 0)).resolves.toBe(
+  await expect(readSubmittedPromptFingerprint(runtime, [])).resolves.toBe(
     browserPromptFingerprint(text, "current-message"),
   );
-  await expect(readSubmittedPromptFingerprint(runtime, 1)).resolves.toBeUndefined();
+  await expect(
+    readSubmittedPromptFingerprint(runtime, ["current-message"]),
+  ).resolves.toBeUndefined();
   expect(browserPromptFingerprint(text, "current-message")).not.toBe(
     browserPromptFingerprint(
       "# Heading\n[spec](https://example.com)\n```python\nif active:\n  run()\n```",
@@ -107,7 +139,7 @@ test("waits for asynchronous user-turn mounting within the configured input time
       },
     }),
   } as unknown as ChromeClient["Runtime"];
-  await expect(readSubmittedPromptFingerprint(runtime, 0, 1000)).resolves.toBe(
+  await expect(readSubmittedPromptFingerprint(runtime, [], 1000)).resolves.toBe(
     browserPromptFingerprint("Mounted user prompt", "current-message"),
   );
   expect(calls).toBe(2);
@@ -121,7 +153,7 @@ test("retries a replaced execution context without treating a closed connection 
       return { result: { value: { text: "Committed prompt", messageId: "current-message" } } };
     },
   } as unknown as ChromeClient["Runtime"];
-  await expect(readSubmittedPromptFingerprint(runtime, 0, 1000)).resolves.toBe(
+  await expect(readSubmittedPromptFingerprint(runtime, [], 1000)).resolves.toBe(
     browserPromptFingerprint("Committed prompt", "current-message"),
   );
   expect(calls).toBe(2);
@@ -130,6 +162,6 @@ test("retries a replaced execution context without treating a closed connection 
     calls++;
     throw new Error("WebSocket is not open");
   };
-  await expect(readSubmittedPromptFingerprint(runtime, 0, 1000)).resolves.toBeUndefined();
+  await expect(readSubmittedPromptFingerprint(runtime, [], 1000)).resolves.toBeUndefined();
   expect(calls).toBe(1);
 });

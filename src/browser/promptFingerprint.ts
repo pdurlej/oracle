@@ -8,46 +8,67 @@ export function browserPromptFingerprint(value: unknown, messageId: string): str
     .digest("hex");
 }
 
-export function resolveSubmittedPromptBaseline(
-  initial: number | null,
-  recovered: unknown,
-): number | null {
-  if (initial !== null) return initial;
-  // The provider points at the last committed turn, which may already be the assistant.
-  return typeof recovered === "number" && Number.isFinite(recovered)
-    ? Math.max(0, Math.floor(recovered) - 1)
-    : null;
+export function readUserMessageIds(
+  runtime: ChromeClient["Runtime"],
+  timeoutMs = 0,
+): Promise<string[] | undefined> {
+  return readDomUntil(
+    runtime,
+    `Array.from(document.querySelectorAll('[data-message-author-role="user"]'), user => user.getAttribute('data-message-id'))`,
+    timeoutMs,
+    (value) =>
+      Array.isArray(value) && value.every((id) => typeof id === "string" && id.trim())
+        ? (value as string[])
+        : undefined,
+  );
 }
 
 export async function readSubmittedPromptFingerprint(
   runtime: ChromeClient["Runtime"],
-  baselineTurns: number | null,
+  previousMessageIds: readonly string[] | undefined,
   timeoutMs = 0,
 ): Promise<string | undefined> {
-  if (baselineTurns === null) return undefined;
-  const deadline = Date.now() + Math.max(0, timeoutMs);
-  for (;;) {
-    try {
-      const result = await runtime.evaluate({
-        expression: `(() => {
+  if (previousMessageIds === undefined) return undefined;
+  const previous = new Set(previousMessageIds);
+  return readDomUntil(
+    runtime,
+    `(() => {
         const turns = ${buildConversationTurnListExpression()};
-        for (let index = turns.length - 1; index >= ${baselineTurns}; index--) {
+        for (let index = turns.length - 1; index >= 0; index--) {
           const turn = turns[index];
           const user = turn.matches('[data-message-author-role="user"]') ? turn : turn.querySelector('[data-message-author-role="user"]');
           if (user) return { text: user.textContent, messageId: user.getAttribute('data-message-id') };
         }
         return null;
       })()`,
-        returnByValue: true,
-      });
-      const turn = result.result?.value;
+    timeoutMs,
+    (value) => {
+      const turn = value as { text?: unknown; messageId?: unknown } | null;
       if (
         typeof turn?.text === "string" &&
         turn.text.trim() &&
         typeof turn.messageId === "string" &&
-        turn.messageId.trim()
+        turn.messageId.trim() &&
+        !previous.has(turn.messageId)
       )
         return browserPromptFingerprint(turn.text, turn.messageId);
+      return undefined;
+    },
+  );
+}
+
+async function readDomUntil<T>(
+  runtime: ChromeClient["Runtime"],
+  expression: string,
+  timeoutMs: number,
+  select: (value: unknown) => T | undefined,
+): Promise<T | undefined> {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    try {
+      const result = await runtime.evaluate({ expression, returnByValue: true });
+      const selected = select(result.result?.value);
+      if (selected !== undefined) return selected;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (

@@ -1,7 +1,4 @@
-import {
-  readSubmittedPromptFingerprint,
-  resolveSubmittedPromptBaseline,
-} from "./promptFingerprint.js";
+import { readSubmittedPromptFingerprint, readUserMessageIds } from "./promptFingerprint.js";
 import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -1883,6 +1880,7 @@ async function runBrowserModeInternal(
         deepResearch && client
           ? await captureDeepResearchTargetBaseline(client, logger)
           : undefined;
+      const previousUserMessageIds = await readUserMessageIds(Runtime, config.inputTimeoutMs);
       await runProviderSubmissionFlow(chatgptDomProvider, {
         prompt,
         evaluate: async () => undefined,
@@ -1892,13 +1890,9 @@ async function runBrowserModeInternal(
       });
       await markPromptSubmitted();
       const providerBaselineTurns = providerState.baselineTurns;
-      const fingerprintBaseline = resolveSubmittedPromptBaseline(
-        baselineTurns,
-        providerBaselineTurns,
-      );
       const renderedPromptHash = await readSubmittedPromptFingerprint(
         Runtime,
-        fingerprintBaseline,
+        previousUserMessageIds,
         config.inputTimeoutMs,
       );
       if (renderedPromptHash) {
@@ -3550,6 +3544,7 @@ async function runRemoteBrowserMode(
         deepResearch && client
           ? await captureDeepResearchTargetBaseline(client, logger)
           : undefined;
+      const previousUserMessageIds = await readUserMessageIds(Runtime, config.inputTimeoutMs);
       await runProviderSubmissionFlow(chatgptDomProvider, {
         prompt,
         evaluate: async () => undefined,
@@ -3559,13 +3554,9 @@ async function runRemoteBrowserMode(
       });
       await markPromptSubmitted();
       const providerBaselineTurns = providerState.baselineTurns;
-      const fingerprintBaseline = resolveSubmittedPromptBaseline(
-        baselineTurns,
-        providerBaselineTurns,
-      );
       const renderedPromptHash = await readSubmittedPromptFingerprint(
         Runtime,
-        fingerprintBaseline,
+        previousUserMessageIds,
         config.inputTimeoutMs,
       );
       if (renderedPromptHash) {
