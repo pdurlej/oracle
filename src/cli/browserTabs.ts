@@ -4,11 +4,7 @@ import chalk from "chalk";
 import { sessionStore } from "../sessionStore.js";
 import type { SessionMetadata } from "../sessionStore.js";
 import { resolveBrowserConfig } from "../browser/config.js";
-import {
-  browserPromptFingerprint,
-  normalizeBrowserPromptText,
-  renderLegacyBrowserPrompt,
-} from "../browser/promptFingerprint.js";
+import { browserPromptFingerprint } from "../browser/promptFingerprint.js";
 import {
   collectChatGptTabs,
   DEFAULT_REMOTE_CHROME_HOST,
@@ -58,79 +54,20 @@ function finishRecoveredChrome(
   }
 }
 
-function normalizePromptText(value: unknown): string {
-  return normalizeBrowserPromptText(value);
-}
-
-interface ExpectedBrowserPrompt {
-  text: string | undefined;
-  exact: boolean;
-  fingerprint?: string;
-  renderedText?: string;
-}
-
-function matchesLegacyBrowserPrompt(observed: string, expected: string, exact: boolean): boolean {
-  if (observed === expected) return true;
-  if (exact || !observed.startsWith(`${expected} `)) return false;
-  const suffix = observed.slice(expected.length).trim();
-  if (/^(?:### )?File(?: \d+)?: /.test(suffix)) return true;
-  return /^The attached attachments-bundle(?:-[\w.-]+)?\.zip contains [1-9]\d* selected files? with relative paths preserved\. Extract it into a temporary directory, then inspect the resulting file tree with filesystem and search tools before answering\.$/.test(
-    suffix,
-  );
-}
-
 function harvestMatchesSessionPrompt(
   harvested: ChatGptTabSummary,
-  expectedPrompt: ExpectedBrowserPrompt,
+  fingerprint: string | undefined,
 ): boolean {
-  const assistantText = harvested.lastAssistantMarkdown ?? harvested.lastAssistantText;
-  if (harvested.assistantFollowsLatestUser !== true || !assistantText?.trim()) {
-    return false;
-  }
-  if (expectedPrompt.fingerprint) {
-    return (
-      browserPromptFingerprint(harvested.lastUserTextRaw ?? harvested.lastUserText) ===
-      expectedPrompt.fingerprint
-    );
-  }
-  const expected = normalizePromptText(expectedPrompt.text);
-  if (!expected) {
-    return true;
-  }
-  const observedVariants = [harvested.lastUserText, harvested.lastUserVisibleText]
-    .map(normalizePromptText)
-    .filter(Boolean);
-  const expectedVariants = [expected, expectedPrompt.renderedText].filter((text): text is string =>
-    Boolean(text),
+  const answer = harvested.lastAssistantMarkdown ?? harvested.lastAssistantText;
+  if (harvested.assistantFollowsLatestUser !== true || !answer?.trim()) return false;
+  return (
+    fingerprint === undefined ||
+    (typeof harvested.lastUserTurnIndex === "number" &&
+      browserPromptFingerprint(
+        harvested.lastUserTextRaw ?? harvested.lastUserText,
+        harvested.lastUserTurnIndex,
+      ) === fingerprint)
   );
-  return observedVariants.some((observed) =>
-    expectedVariants.some((candidate) =>
-      matchesLegacyBrowserPrompt(observed, candidate, expectedPrompt.exact),
-    ),
-  );
-}
-
-function expectedLatestUserPrompt(meta: SessionMetadata): ExpectedBrowserPrompt {
-  const fingerprint = meta.browser?.runtime?.submittedPromptHash;
-  if (fingerprint === null)
-    throw new Error(
-      "The submitted browser turn was not confirmed before interruption; use an explicit --browser-tab to inspect it.",
-    );
-  if (fingerprint) return { text: undefined, exact: true, fingerprint };
-  const followUps = meta.options?.browserFollowUps;
-  if (Array.isArray(followUps)) {
-    const prompts = followUps
-      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
-      .map((value) => value.trim());
-    const finalPrompt = prompts.at(-1);
-    if (finalPrompt) return { text: finalPrompt, exact: true };
-  }
-  const system = typeof meta.options?.system === "string" ? meta.options.system.trim() : "";
-  const prompt = typeof meta.options?.prompt === "string" ? meta.options.prompt.trim() : "";
-  return {
-    text: [system, prompt].filter(Boolean).join("\n\n") || undefined,
-    exact: false,
-  };
 }
 
 async function harvestSessionPrompt(
@@ -138,19 +75,25 @@ async function harvestSessionPrompt(
   options: Parameters<typeof harvestChatGptTab>[0],
   requireSessionPrompt = true,
 ): Promise<ChatGptTabSummary> {
-  const expectedPrompt: ExpectedBrowserPrompt = requireSessionPrompt
-    ? expectedLatestUserPrompt(meta)
-    : { text: undefined, exact: false };
-  if (expectedPrompt.text)
-    expectedPrompt.renderedText = renderLegacyBrowserPrompt(expectedPrompt.text);
+  const fingerprint = requireSessionPrompt ? meta.browser?.runtime?.submittedPromptHash : undefined;
+  if (fingerprint === null) {
+    throw new Error(
+      "This browser session has no confirmed submitted user turn; retry after submission or use --browser-tab to inspect a specific tab.",
+    );
+  }
+  if (requireSessionPrompt && fingerprint === undefined) {
+    console.warn(
+      "Legacy browser session: submitted-turn identity is unavailable; verifying only latest user/assistant pairing.",
+    );
+  }
   const freshnessTimeoutMs = resolveBrowserConfig(meta.browser?.config).inputTimeoutMs;
   const deadline = Date.now() + freshnessTimeoutMs;
   let harvested = await harvestChatGptTab(options);
-  while (!harvestMatchesSessionPrompt(harvested, expectedPrompt) && Date.now() < deadline) {
+  while (!harvestMatchesSessionPrompt(harvested, fingerprint) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, HARVEST_FRESHNESS_POLL_MS));
     harvested = await harvestChatGptTab(options);
   }
-  if (!harvestMatchesSessionPrompt(harvested, expectedPrompt)) {
+  if (!harvestMatchesSessionPrompt(harvested, fingerprint)) {
     throw new Error(
       `Latest ChatGPT turn did not contain an assistant answer paired with this session prompt after ${Math.ceil(freshnessTimeoutMs / 1000)}s; refusing to harvest stale output.`,
     );

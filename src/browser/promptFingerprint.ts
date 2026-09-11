@@ -1,40 +1,22 @@
 import { createHash } from "node:crypto";
-import { stripVTControlCharacters } from "node:util";
-import { render } from "markdansi";
 import type { ChromeClient } from "./types.js";
 import { buildConversationTurnListExpression } from "./conversationTurns.js";
 
-export function normalizeBrowserPromptText(value: unknown): string {
-  return String(value ?? "")
-    .replace(/```/g, " ")
-    .replace(/`([^`]*)`/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export function renderLegacyBrowserPrompt(value: string): string {
-  // OSC links retain their labels without appending destinations to the displayed text.
-  const rendered = render(value, {
-    color: true,
-    hyperlinks: true,
-    wrap: false,
-    codeBox: false,
-    codeGutter: false,
-    codeWrap: false,
-    quotePrefix: "",
-    tableBorder: "none",
-    tablePadding: 0,
-    tableTruncate: false,
-  });
-  return normalizeBrowserPromptText(
-    stripVTControlCharacters(rendered).replace(/^\s*(?:[-+*]|\d+[.)])\s+/gm, ""),
-  );
-}
-
-export function browserPromptFingerprint(value: unknown): string {
+export function browserPromptFingerprint(value: unknown, turnIndex: number): string {
   return createHash("sha256")
-    .update(String(value ?? "").replace(/\r\n?/g, "\n"))
+    .update(JSON.stringify([turnIndex, String(value ?? "").replace(/\r\n?/g, "\n")]))
     .digest("hex");
+}
+
+export function resolveSubmittedPromptBaseline(
+  initial: number | null,
+  recovered: unknown,
+): number | null {
+  if (initial !== null) return initial;
+  // The provider points at the last committed turn, which may already be the assistant.
+  return typeof recovered === "number" && Number.isFinite(recovered)
+    ? Math.max(0, Math.floor(recovered) - 1)
+    : null;
 }
 
 export async function readSubmittedPromptFingerprint(
@@ -52,16 +34,23 @@ export async function readSubmittedPromptFingerprint(
         for (let index = turns.length - 1; index >= ${baselineTurns}; index--) {
           const turn = turns[index];
           const user = turn.matches('[data-message-author-role="user"]') ? turn : turn.querySelector('[data-message-author-role="user"]');
-          if (user) return user.textContent;
+          if (user) return { text: user.textContent, turnIndex: index };
         }
         return null;
       })()`,
         returnByValue: true,
       });
-      const text = result.result?.value;
-      if (typeof text === "string" && text.trim()) return browserPromptFingerprint(text);
-    } catch {
-      return undefined;
+      const turn = result.result?.value;
+      if (typeof turn?.text === "string" && turn.text.trim() && Number.isInteger(turn.turnIndex))
+        return browserPromptFingerprint(turn.text, turn.turnIndex);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        !/Cannot find (?:default )?(?:execution )?context|Execution context (?:was destroyed|is not available)/i.test(
+          message,
+        )
+      )
+        return undefined;
     }
     if (Date.now() >= deadline) return undefined;
     await new Promise((resolve) => setTimeout(resolve, Math.min(100, deadline - Date.now())));

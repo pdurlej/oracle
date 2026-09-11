@@ -93,13 +93,18 @@ export async function performSessionRun({
     return muteStdout ? true : process.stdout.write(chunk);
   };
   let currentBrowser: SessionMetadata["browser"] = browserConfig
-    ? { config: browserConfig }
+    ? {
+        config: browserConfig,
+        ...(mode === "browser" && sessionMeta.browser?.runtime?.submittedPromptHash !== undefined
+          ? { runtime: { submittedPromptHash: null } }
+          : {}),
+      }
     : sessionMeta.browser;
   await sessionStore.updateSession(sessionMeta.id, {
     status: "running",
     startedAt: new Date().toISOString(),
     mode,
-    ...(browserConfig ? { browser: { config: browserConfig } } : {}),
+    ...(browserConfig ? { browser: currentBrowser } : {}),
   });
   const notificationSettings =
     notifications ?? deriveNotificationSettingsFromMetadata(sessionMeta, process.env);

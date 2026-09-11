@@ -146,14 +146,15 @@ is retained under `browser.harvest.integrity` and shown as a browser warning;
 an implicit harvest fails with `conversation-identity-mismatch` before exporting
 the newly harvested answer. Existing transcripts and answer logs are preserved.
 
-Implicit harvest also waits for an assistant answer paired with the session's
-latest submitted prompt, up to the saved browser input timeout. New runs record a hash of the actual submitted composer text, including file
-context, so interrupted sequences can recover their last submitted turn. Older
-sessions use the final configured follow-up or the stored initial prompt with
-numbered file sections. A stale or unrelated turn
-fails without replacing the saved output. Follow-up prompts must match exactly;
-initial prompts may include appended file context. Explicit alternate-tab
-inspection still requires a paired answer but does not match the old prompt.
+Implicit harvest also waits for an assistant answer paired with the latest user
+turn, up to the saved browser input timeout. New browser sessions record a
+fingerprint of each rendered, committed user turn and its conversation position
+before waiting for its answer, including repeated follow-ups. A mismatch preserves the original output; an unconfirmed
+submission requires waiting or explicit tab inspection.
+
+Older sessions without a fingerprint retain their existing recovery behavior,
+with a warning that only latest user/assistant pairing can be checked. Their
+submitted file context cannot be reconstructed reliably from saved metadata.
 
 An explicit `--browser-tab` override still permits inspecting another target,
 but records the mismatch and does not reassign the original capture. Unavailable

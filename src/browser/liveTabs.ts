@@ -53,7 +53,6 @@ export interface ChatGptTabSummary {
   lastAssistantSnippet: string;
   lastUserText: string;
   lastUserTextRaw?: string;
-  lastUserVisibleText?: string;
   lastUserSnippet: string;
   focused: boolean;
   visibilityState: string;
@@ -268,8 +267,6 @@ function buildTabInspectionExpression(): string {
         lastUserText,
         lastUserTextRaw: (lastUserTurn?.matches?.('[data-message-author-role="user"]')
           ? lastUserTurn : lastUserTurn?.querySelector?.('[data-message-author-role="user"]'))?.textContent,
-        lastUserVisibleText: (lastUserTurn?.matches?.('[data-message-author-role="user"]')
-          ? lastUserTurn : lastUserTurn?.querySelector?.('[data-message-author-role="user"]'))?.innerText,
         visibilityState: document.visibilityState,
         focused: Boolean(document.hasFocus?.()),
       };
@@ -341,7 +338,6 @@ export async function inspectChatGptTab(
       lastUserTurnIndex?: number;
       lastUserText?: string;
       lastUserTextRaw?: string;
-      lastUserVisibleText?: string;
       visibilityState?: string;
       focused?: boolean;
     };
@@ -389,7 +385,6 @@ export async function inspectChatGptTab(
       lastAssistantSnippet: trimToSnippet(lastAssistantText),
       lastUserText,
       lastUserTextRaw: info.lastUserTextRaw,
-      lastUserVisibleText: info.lastUserVisibleText,
       lastUserSnippet: trimToSnippet(lastUserText),
       focused: Boolean(info.focused),
       visibilityState: typeof info.visibilityState === "string" ? info.visibilityState : "",
@@ -623,7 +618,6 @@ export async function harvestChatGptTab(
       harvested.loginButtonExists = followup.loginButtonExists;
       harvested.lastUserText = followup.lastUserText;
       harvested.lastUserTextRaw = followup.lastUserTextRaw;
-      harvested.lastUserVisibleText = followup.lastUserVisibleText;
       harvested.lastUserSnippet = followup.lastUserSnippet;
       harvested.assistantFollowsLatestUser = followup.assistantFollowsLatestUser;
       harvested.lastAssistantTurnIndex = followup.lastAssistantTurnIndex;

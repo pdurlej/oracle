@@ -113,7 +113,7 @@ export interface BrowserRuntimeMetadata {
   conversationId?: string;
   /** True after Oracle has submitted the prompt to ChatGPT. */
   promptSubmitted?: boolean;
-  /** Fingerprint of the exact most recently submitted composer text. */
+  /** Fingerprint of committed user text and turn position; null until commitment is confirmed. */
   submittedPromptHash?: string | null;
   /** Latest Deep Research plan captured from ChatGPT's out-of-process iframe. */
   researchPlan?: BrowserResearchPlanMetadata;
@@ -737,7 +737,15 @@ export async function initializeSession(
     })),
     cwd,
     mode,
-    browser: browserConfig ? { config: browserConfig } : undefined,
+    browser:
+      mode === "browser"
+        ? {
+            ...(browserConfig ? { config: browserConfig } : {}),
+            runtime: { submittedPromptHash: null },
+          }
+        : browserConfig
+          ? { config: browserConfig }
+          : undefined,
     notifications,
     options: {
       prompt: options.prompt,

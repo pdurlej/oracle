@@ -1,4 +1,7 @@
-import { readSubmittedPromptFingerprint } from "./promptFingerprint.js";
+import {
+  readSubmittedPromptFingerprint,
+  resolveSubmittedPromptBaseline,
+} from "./promptFingerprint.js";
 import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -1134,7 +1137,7 @@ async function runBrowserModeInternal(
   let lastTargetId: string | undefined;
   let lastUrl: string | undefined;
   let promptSubmitted = false;
-  let submittedPromptHash: string | null | undefined;
+  let submittedPromptHash: string | null = null;
   let ownedRecoveryTarget: BrowserRunResult["ownedRecoveryTarget"];
   const targetClaimId = randomUUID();
   let modelSelectionEvidence: BrowserModelSelectionEvidence | undefined;
@@ -1888,16 +1891,20 @@ async function runBrowserModeInternal(
         state: providerState,
       });
       await markPromptSubmitted();
+      const providerBaselineTurns = providerState.baselineTurns;
+      const fingerprintBaseline = resolveSubmittedPromptBaseline(
+        baselineTurns,
+        providerBaselineTurns,
+      );
       const renderedPromptHash = await readSubmittedPromptFingerprint(
         Runtime,
-        baselineTurns,
+        fingerprintBaseline,
         config.inputTimeoutMs,
       );
       if (renderedPromptHash) {
         submittedPromptHash = renderedPromptHash;
         await emitRuntimeHint();
       }
-      const providerBaselineTurns = providerState.baselineTurns;
       if (typeof providerBaselineTurns === "number" && Number.isFinite(providerBaselineTurns)) {
         baselineTurns = providerBaselineTurns;
       }
@@ -3208,7 +3215,7 @@ async function runRemoteBrowserMode(
   let tabLease: BrowserTabLease | null = null;
   let lastUrl: string | undefined;
   let promptSubmitted = false;
-  let submittedPromptHash: string | null | undefined;
+  let submittedPromptHash: string | null = null;
   let ownedRecoveryTarget: BrowserRunResult["ownedRecoveryTarget"];
   const targetClaimId = randomUUID();
   let modelSelectionEvidence: BrowserModelSelectionEvidence | undefined;
@@ -3551,16 +3558,20 @@ async function runRemoteBrowserMode(
         state: providerState,
       });
       await markPromptSubmitted();
+      const providerBaselineTurns = providerState.baselineTurns;
+      const fingerprintBaseline = resolveSubmittedPromptBaseline(
+        baselineTurns,
+        providerBaselineTurns,
+      );
       const renderedPromptHash = await readSubmittedPromptFingerprint(
         Runtime,
-        baselineTurns,
+        fingerprintBaseline,
         config.inputTimeoutMs,
       );
       if (renderedPromptHash) {
         submittedPromptHash = renderedPromptHash;
         await emitRuntimeHint();
       }
-      const providerBaselineTurns = providerState.baselineTurns;
       if (typeof providerBaselineTurns === "number" && Number.isFinite(providerBaselineTurns)) {
         baselineTurns = providerBaselineTurns;
       }

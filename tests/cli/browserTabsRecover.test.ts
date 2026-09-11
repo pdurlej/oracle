@@ -52,6 +52,8 @@ const completedHarvest = {
 
 describe("harvestSessionBrowserOutput recovery fallback", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.resetModules();
   });
 
@@ -252,17 +254,22 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     expect(recoverConversationTab).not.toHaveBeenCalled();
   });
 
-  test("waits for the assistant paired with the session prompt instead of harvesting a stale turn", async () => {
+  test.each([
+    { reason: "unpaired answer", paired: false, currentIndex: 0 },
+    { reason: "earlier identical prompt", paired: true, currentIndex: 2 },
+  ])("waits instead of harvesting a stale turn ($reason)", async ({ paired, currentIndex }) => {
     const staleHarvest = {
       ...completedHarvest,
       lastUserText: "Current neutral request with the latest constraints",
       lastUserSnippet: "Current neutral request",
       lastAssistantText: "Older answer",
       lastAssistantMarkdown: "Older answer",
-      assistantFollowsLatestUser: false,
+      assistantFollowsLatestUser: paired,
     };
     const freshHarvest = {
       ...completedHarvest,
+      lastUserTurnIndex: currentIndex,
+      lastAssistantTurnIndex: currentIndex + 1,
       lastUserText: "Current neutral request with the latest constraints",
       lastUserSnippet: "Current neutral request",
     };
@@ -288,6 +295,16 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
         readSession: async () => ({
           ...baseMeta,
           options: { prompt: "Current neutral request with the latest constraints" },
+          browser: {
+            ...baseMeta.browser,
+            runtime: {
+              ...baseMeta.browser?.runtime,
+              submittedPromptHash: browserPromptFingerprint(
+                "Current neutral request with the latest constraints",
+                currentIndex,
+              ),
+            },
+          },
         }),
         updateSession: async () => {},
         getPaths,
@@ -340,6 +357,10 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
             browser: {
               ...baseMeta.browser,
               config: { ...baseMeta.browser?.config, inputTimeoutMs: 10_000 },
+              runtime: {
+                ...baseMeta.browser?.runtime,
+                submittedPromptHash: browserPromptFingerprint("Current neutral request", 0),
+              },
             },
           }),
           updateSession: async () => {},
@@ -410,7 +431,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
                 submittedPromptHash:
                   submittedCount === undefined
                     ? undefined
-                    : browserPromptFingerprint(finalFollowUp),
+                    : browserPromptFingerprint(finalFollowUp, 0),
               },
             },
           }),
@@ -422,8 +443,14 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
       const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
       const result = await harvestSessionBrowserOutput("sess-recover", { quietOutput: true });
 
-      expect(harvestChatGptTab).toHaveBeenCalledTimes(2);
-      expect(result.lastAssistantMarkdown).toBe(completedHarvest.lastAssistantMarkdown);
+      expect(harvestChatGptTab).toHaveBeenCalledTimes(submittedCount === undefined ? 1 : 2);
+      expect(result.lastAssistantMarkdown).toBe(
+        submittedCount === undefined ? "Unrelated answer" : completedHarvest.lastAssistantMarkdown,
+      );
+      if (submittedCount === undefined)
+        expect(console.warn).toHaveBeenCalledWith(
+          expect.stringContaining("Legacy browser session"),
+        );
     },
   );
 
@@ -432,7 +459,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     "File 1: example.ts\nconst example = 1;",
     "The attached `attachments-bundle.zip` contains 2 selected files with relative paths preserved. Extract it into a temporary directory, then inspect the resulting file tree with filesystem and search tools before answering.",
     "The attached attachments-bundle-1.zip contains 1 selected file with relative paths preserved. Extract it into a temporary directory, then inspect the resulting file tree with filesystem and search tools before answering.",
-  ])("matches established legacy file context: %s", async (contextSuffix) => {
+  ])("preserves unverified legacy file context: %s", async (contextSuffix) => {
     const harvestChatGptTab = vi.fn().mockResolvedValue({
       ...completedHarvest,
       lastUserText: `Use the public context only\n\nInitial neutral request\n\n${contextSuffix}`,
@@ -457,6 +484,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
           ...baseMeta,
           options: {
             prompt: "Initial neutral request",
+            file: ["example.ts"],
             system: "Use the public context only",
           },
         }),
@@ -478,11 +506,10 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     ["- Alpha\n- Beta", "Alpha\nBeta"],
     ["1. Alpha\n2. Beta", "Alpha\nBeta"],
     ["> Quote\n\n*Emphasis*", "Quote\nEmphasis"],
-  ])("matches legacy Markdown source: %s", async (sourcePrompt, renderedPrompt) => {
+  ])("preserves unverified legacy Markdown recovery: %s", async (sourcePrompt, renderedPrompt) => {
     const harvestChatGptTab = vi.fn().mockResolvedValue({
       ...completedHarvest,
       lastUserText: renderedPrompt.replace(/\n/g, ""),
-      lastUserVisibleText: renderedPrompt,
       lastUserSnippet: renderedPrompt,
     });
 
@@ -512,7 +539,7 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
     const { harvestSessionBrowserOutput } = await import("../../src/cli/browserTabs.js");
     await expect(
       harvestSessionBrowserOutput("sess-recover", { quietOutput: true }),
-    ).resolves.toMatchObject({ lastUserVisibleText: renderedPrompt });
+    ).resolves.toMatchObject({ lastUserText: renderedPrompt.replace(/\n/g, "") });
     expect(harvestChatGptTab).toHaveBeenCalledTimes(1);
   });
 
@@ -654,6 +681,10 @@ describe("harvestSessionBrowserOutput recovery fallback", () => {
             browser: {
               ...baseMeta.browser,
               config: { ...baseMeta.browser?.config, inputTimeoutMs: 750 },
+              runtime: {
+                ...baseMeta.browser?.runtime,
+                submittedPromptHash: browserPromptFingerprint("Current neutral request", 0),
+              },
             },
           }),
           updateSession,
